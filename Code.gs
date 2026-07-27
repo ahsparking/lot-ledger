@@ -25,7 +25,9 @@ function setup() {
 
   var tenants = ss.getSheetByName(SHEET_TENANTS) || ss.insertSheet(SHEET_TENANTS);
   if (tenants.getLastRow() === 0) {
-    tenants.appendRow(["ID", "PropertyID", "Name", "Phone", "SpotLabel", "MonthlyRent", "StartDate", "Active"]);
+    tenants.appendRow(["ID", "PropertyID", "Name", "Phone", "Address", "SpotLabel",
+      "VehicleType", "CarCount", "BikeCount", "MonthlyRent", "Advance",
+      "RevisedRent", "RevisedFrom", "StartDate", "AgreementEnd", "Active"]);
   }
 
   var payments = ss.getSheetByName(SHEET_PAYMENTS) || ss.insertSheet(SHEET_PAYMENTS);
@@ -36,6 +38,27 @@ function setup() {
   // Remove the default "Sheet1" if it's still empty and unused
   var def = ss.getSheetByName("Sheet1");
   if (def && def.getLastRow() === 0) ss.deleteSheet(def);
+}
+
+// ---------- Run this ONCE if you deployed before these fields existed ----------
+// It safely adds any missing columns to your existing Tenants sheet without
+// touching your current data. Select "migrateAddTenantColumns" from the
+// function dropdown above and click Run.
+function migrateAddTenantColumns() {
+  var sheet = getSheet(SHEET_TENANTS);
+  var lastCol = sheet.getLastColumn();
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var required = ["Address", "VehicleType", "CarCount", "BikeCount", "Advance",
+    "RevisedRent", "RevisedFrom", "AgreementEnd"];
+  var added = [];
+  required.forEach(function (h) {
+    if (headers.indexOf(h) === -1) {
+      lastCol++;
+      sheet.getRange(1, lastCol).setValue(h);
+      added.push(h);
+    }
+  });
+  Logger.log(added.length ? "Added columns: " + added.join(", ") : "Nothing to add — already up to date.");
 }
 
 // ---------- Web app entry points ----------
@@ -113,17 +136,30 @@ function addProperty(data) {
 
 function addTenant(data) {
   var sheet = getSheet(SHEET_TENANTS);
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   var id = nextId("T", sheet);
-  sheet.appendRow([
-    id,
-    data.propertyId,
-    data.name,
-    data.phone || "",
-    data.spotLabel || "",
-    Number(data.monthlyRent) || 0,
-    data.startDate,
-    true
-  ]);
+  var values = {
+    ID: id,
+    PropertyID: data.propertyId,
+    Name: data.name,
+    Phone: data.phone || "",
+    Address: data.address || "",
+    SpotLabel: data.spotLabel || "",
+    VehicleType: data.vehicleType || "",
+    CarCount: data.carCount ? Number(data.carCount) : "",
+    BikeCount: data.bikeCount ? Number(data.bikeCount) : "",
+    MonthlyRent: Number(data.monthlyRent) || 0,
+    Advance: data.advance ? Number(data.advance) : "",
+    RevisedRent: data.revisedRent ? Number(data.revisedRent) : "",
+    RevisedFrom: data.revisedFrom || "",
+    StartDate: data.startDate,
+    AgreementEnd: data.agreementEnd || "",
+    Active: true
+  };
+  var row = headers.map(function (h) {
+    return values.hasOwnProperty(h) ? values[h] : "";
+  });
+  sheet.appendRow(row);
   return { ok: true, id: id };
 }
 
@@ -132,14 +168,35 @@ function updateTenant(data) {
   var values = sheet.getDataRange().getValues();
   var headers = values[0];
   var idCol = headers.indexOf("ID");
+
+  // field name -> how to coerce the incoming value
+  var setters = {
+    name: { col: "Name", cast: String },
+    phone: { col: "Phone", cast: String },
+    address: { col: "Address", cast: String },
+    spotLabel: { col: "SpotLabel", cast: String },
+    vehicleType: { col: "VehicleType", cast: String },
+    carCount: { col: "CarCount", cast: Number },
+    bikeCount: { col: "BikeCount", cast: Number },
+    monthlyRent: { col: "MonthlyRent", cast: Number },
+    advance: { col: "Advance", cast: Number },
+    revisedRent: { col: "RevisedRent", cast: Number },
+    revisedFrom: { col: "RevisedFrom", cast: String },
+    agreementEnd: { col: "AgreementEnd", cast: String },
+    active: { col: "Active", cast: function (v) { return v; } }
+  };
+
   for (var i = 1; i < values.length; i++) {
     if (values[i][idCol] === data.id) {
       var rowNum = i + 1;
-      if (data.name !== undefined) sheet.getRange(rowNum, headers.indexOf("Name") + 1).setValue(data.name);
-      if (data.phone !== undefined) sheet.getRange(rowNum, headers.indexOf("Phone") + 1).setValue(data.phone);
-      if (data.spotLabel !== undefined) sheet.getRange(rowNum, headers.indexOf("SpotLabel") + 1).setValue(data.spotLabel);
-      if (data.monthlyRent !== undefined) sheet.getRange(rowNum, headers.indexOf("MonthlyRent") + 1).setValue(Number(data.monthlyRent));
-      if (data.active !== undefined) sheet.getRange(rowNum, headers.indexOf("Active") + 1).setValue(data.active);
+      Object.keys(setters).forEach(function (key) {
+        if (data[key] === undefined) return;
+        var colIndex = headers.indexOf(setters[key].col);
+        if (colIndex === -1) return; // column doesn't exist yet — run migrateAddTenantColumns()
+        var raw = data[key];
+        var val = raw === "" ? "" : setters[key].cast(raw);
+        sheet.getRange(rowNum, colIndex + 1).setValue(val);
+      });
       return { ok: true };
     }
   }
