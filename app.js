@@ -120,9 +120,18 @@ function firstOfNextMonth(dateStr) {
   return n.toISOString().slice(0, 10);
 }
 
+function lastDayOfPreviousMonth(dateStr) {
+  const d = new Date(dateStr);
+  const n = new Date(d.getFullYear(), d.getMonth(), 0); // day 0 = last day of the prior month
+  return n.toISOString().slice(0, 10);
+}
+
 function tenantBalance(t) {
   const today = todayStr();
-  const endCap = (t.AgreementEnd && t.AgreementEnd < today) ? t.AgreementEnd : today;
+  // Rent for a month is only "due" once that month has fully ended (arrears billing) —
+  // so the in-progress current month never shows up as owed yet.
+  const arrearsCap = lastDayOfPreviousMonth(today);
+  const endCap = (t.AgreementEnd && t.AgreementEnd < today) ? t.AgreementEnd : arrearsCap;
 
   const hasOpening = t.OpeningBalance !== undefined && t.OpeningBalance !== "" && t.OpeningBalanceDate;
   const openingAmt = hasOpening ? Number(t.OpeningBalance) || 0 : 0;
