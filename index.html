@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=20260728-4">
 </head>
 <body>
 
@@ -135,6 +135,10 @@
     <div class="settings-card">
       <h3>First time here?</h3>
       <p class="helper-text">Open SETUP.md (included in your download) for the 5-minute steps to connect your Google Sheet.</p>
+    </div>
+
+    <div class="settings-card">
+      <p class="helper-text">App build: <span id="appVersion" class="mono"></span> — if this doesn't match the version you were told to expect, your phone is showing a cached/old copy. Reload the page (not the installed icon) and try again.</p>
     </div>
   </section>
 
@@ -317,6 +321,6 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="app.js"></script>
+<script src="app.js?v=20260728-4"></script>
 </body>
 </html>

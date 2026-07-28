@@ -2,6 +2,7 @@
    LOT LEDGER — app logic
    ========================================================== */
 
+const APP_VERSION = "2026-07-28.4";
 const LS_CONFIG = "ll_config";
 const LS_CACHE = "ll_cache";
 
@@ -699,6 +700,7 @@ if ("serviceWorker" in navigator) {
 // Init
 // ---------------------------------------------------------
 loadConfigIntoForm();
+$("#appVersion").textContent = APP_VERSION;
 setConnStatus(false);
 if (CONFIG.apiUrl && CONFIG.apiKey) {
   loadData();
