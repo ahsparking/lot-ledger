@@ -260,6 +260,18 @@
         <input type="date" id="atRevisedFrom">
       </div>
     </div>
+    <div class="group-label" style="margin-top:4px">Starting balance (for tenants moved in from Excel)</div>
+    <p class="helper-text" style="margin:-4px 0 12px">If this tenant already has history outside the app, enter what they owe right now — the app will only calculate new rent from this date onward, so you don't have to re-enter old payments. Leave both blank for a brand-new tenant.</p>
+    <div class="field-row">
+      <div class="field">
+        <label for="atOpeningBalance">Amount currently due (₹)</label>
+        <input type="number" inputmode="numeric" id="atOpeningBalance" class="mono-input" placeholder="0 if fully paid up">
+      </div>
+      <div class="field">
+        <label for="atOpeningDate">As of date</label>
+        <input type="date" id="atOpeningDate">
+      </div>
+    </div>
     <button class="btn btn-primary" id="btnSaveTenant">Save tenant</button>
     <div id="atEditId" style="display:none"></div>
   </div>

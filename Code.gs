@@ -27,7 +27,8 @@ function setup() {
   if (tenants.getLastRow() === 0) {
     tenants.appendRow(["ID", "PropertyID", "Name", "Phone", "Address", "SpotLabel",
       "VehicleType", "CarCount", "BikeCount", "MonthlyRent", "Advance",
-      "RevisedRent", "RevisedFrom", "StartDate", "AgreementEnd", "Active"]);
+      "RevisedRent", "RevisedFrom", "StartDate", "AgreementEnd",
+      "OpeningBalance", "OpeningBalanceDate", "Active"]);
   }
 
   var payments = ss.getSheetByName(SHEET_PAYMENTS) || ss.insertSheet(SHEET_PAYMENTS);
@@ -49,7 +50,7 @@ function migrateAddTenantColumns() {
   var lastCol = sheet.getLastColumn();
   var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
   var required = ["Address", "VehicleType", "CarCount", "BikeCount", "Advance",
-    "RevisedRent", "RevisedFrom", "AgreementEnd"];
+    "RevisedRent", "RevisedFrom", "AgreementEnd", "OpeningBalance", "OpeningBalanceDate"];
   var added = [];
   required.forEach(function (h) {
     if (headers.indexOf(h) === -1) {
@@ -154,6 +155,8 @@ function addTenant(data) {
     RevisedFrom: data.revisedFrom || "",
     StartDate: data.startDate,
     AgreementEnd: data.agreementEnd || "",
+    OpeningBalance: data.openingBalance !== undefined && data.openingBalance !== "" ? Number(data.openingBalance) : "",
+    OpeningBalanceDate: data.openingBalanceDate || "",
     Active: true
   };
   var row = headers.map(function (h) {
@@ -183,6 +186,8 @@ function updateTenant(data) {
     revisedRent: { col: "RevisedRent", cast: Number },
     revisedFrom: { col: "RevisedFrom", cast: String },
     agreementEnd: { col: "AgreementEnd", cast: String },
+    openingBalance: { col: "OpeningBalance", cast: Number },
+    openingBalanceDate: { col: "OpeningBalanceDate", cast: String },
     active: { col: "Active", cast: function (v) { return v; } }
   };
 

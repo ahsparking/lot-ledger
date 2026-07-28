@@ -114,22 +114,37 @@ function currentRent(t) {
   return Number(t.MonthlyRent || 0);
 }
 
+function firstOfNextMonth(dateStr) {
+  const d = new Date(dateStr);
+  const n = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+  return n.toISOString().slice(0, 10);
+}
+
 function tenantBalance(t) {
-  const start = t.StartDate;
   const today = todayStr();
-  // Cap charging at the agreement end date if it's already passed
   const endCap = (t.AgreementEnd && t.AgreementEnd < today) ? t.AgreementEnd : today;
 
-  let charged;
+  const hasOpening = t.OpeningBalance !== undefined && t.OpeningBalance !== "" && t.OpeningBalanceDate;
+  const openingAmt = hasOpening ? Number(t.OpeningBalance) || 0 : 0;
+  // Rent only starts accruing from the month AFTER the opening-balance date —
+  // that date's "as of" amount already accounts for everything up to then.
+  const baselineStart = hasOpening ? firstOfNextMonth(t.OpeningBalanceDate) : t.StartDate;
+
+  let charged = openingAmt;
   if (t.RevisedRent && t.RevisedFrom) {
-    const oldMonths = monthsBetweenInclusive(start, dayBefore(t.RevisedFrom));
+    const oldMonths = monthsBetweenInclusive(baselineStart, dayBefore(t.RevisedFrom));
     const newMonths = monthsBetweenInclusive(t.RevisedFrom, endCap);
-    charged = oldMonths * Number(t.MonthlyRent || 0) + newMonths * Number(t.RevisedRent || 0);
+    charged += oldMonths * Number(t.MonthlyRent || 0) + newMonths * Number(t.RevisedRent || 0);
   } else {
-    charged = monthsBetweenInclusive(start, endCap) * Number(t.MonthlyRent || 0);
+    charged += monthsBetweenInclusive(baselineStart, endCap) * Number(t.MonthlyRent || 0);
   }
 
-  const paid = tenantPayments(t.ID).reduce((s, p) => s + Number(p.Amount || 0), 0);
+  // Only count payments logged on/after the opening-balance date, so history
+  // already folded into the opening balance isn't subtracted twice.
+  let pays = tenantPayments(t.ID);
+  if (hasOpening) pays = pays.filter((p) => p.Date >= t.OpeningBalanceDate);
+  const paid = pays.reduce((s, p) => s + Number(p.Amount || 0), 0);
+
   return { charged, paid, balance: charged - paid };
 }
 
@@ -328,6 +343,7 @@ function openTenantProfile(id) {
   detailRows.push(["Fixed rent", fmt(t.MonthlyRent)]);
   if (t.RevisedRent) detailRows.push(["Revised rent", fmt(t.RevisedRent) + " (from " + t.RevisedFrom + ")"]);
   if (t.Advance) detailRows.push(["Advance held", fmt(t.Advance)]);
+  if (t.OpeningBalanceDate) detailRows.push(["Opening balance", fmt(t.OpeningBalance || 0) + " as of " + t.OpeningBalanceDate]);
   detailRows.push(["Agreement", t.StartDate + (t.AgreementEnd ? " → " + t.AgreementEnd : " → ongoing")]);
   details.innerHTML = "";
   detailRows.forEach(([k, v]) => {
@@ -377,6 +393,8 @@ $("#tpBtnEdit").onclick = () => {
   $("#atEnd").value = t.AgreementEnd || "";
   $("#atRevisedRent").value = t.RevisedRent || "";
   $("#atRevisedFrom").value = t.RevisedFrom || "";
+  $("#atOpeningBalance").value = t.OpeningBalance || "";
+  $("#atOpeningDate").value = t.OpeningBalanceDate || "";
   $("#atEditId").textContent = t.ID;
   openSheet("sheetAddTenant");
 };
@@ -393,6 +411,7 @@ $("#btnAddTenantTop").onclick = () => {
   $("#atRent").value = ""; $("#atAdvance").value = "";
   $("#atStart").value = todayStr(); $("#atEnd").value = "";
   $("#atRevisedRent").value = ""; $("#atRevisedFrom").value = "";
+  $("#atOpeningBalance").value = ""; $("#atOpeningDate").value = "";
   renderPropertyOptions();
   openSheet("sheetAddTenant");
 };
@@ -428,7 +447,9 @@ $("#btnSaveTenant").onclick = async () => {
     advance: $("#atAdvance").value,
     revisedRent: $("#atRevisedRent").value,
     revisedFrom: $("#atRevisedFrom").value,
-    agreementEnd: $("#atEnd").value
+    agreementEnd: $("#atEnd").value,
+    openingBalance: $("#atOpeningBalance").value,
+    openingBalanceDate: $("#atOpeningDate").value
   };
   try {
     if (editId) {
