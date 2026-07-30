@@ -1,9 +1,9 @@
-const CACHE = "lot-ledger-v5";
+const CACHE = "lot-ledger-v6";
 const ASSETS = [
   "./",
   "./index.html",
-  "./style.css?v=20260730-2",
-  "./app.js?v=20260730-2",
+  "./style.css?v=20260730-3",
+  "./app.js?v=20260730-3",
   "./manifest.json",
   "./icons/icon-192.png",
   "./icons/icon-512.png"

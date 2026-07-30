@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260730-2">
+<link rel="stylesheet" href="style.css?v=20260730-3">
 </head>
 <body>
 
@@ -108,11 +108,21 @@
       <h3>Google Sheet connection</h3>
       <div class="field">
         <label for="cfgUrl">Apps Script Web App URL</label>
-        <input type="text" id="cfgUrl" placeholder="https://script.google.com/macros/s/…/exec">
+        <div class="field-reveal">
+          <input type="password" id="cfgUrl" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off">
+          <button type="button" class="reveal-btn" data-reveal="cfgUrl" aria-label="Show">
+            <svg viewBox="0 0 24 24" fill="none" width="18" height="18"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7"/></svg>
+          </button>
+        </div>
       </div>
       <div class="field">
         <label for="cfgKey">API key</label>
-        <input type="text" id="cfgKey" placeholder="the key you set in Code.gs">
+        <div class="field-reveal">
+          <input type="password" id="cfgKey" placeholder="the key you set in Code.gs" autocomplete="off">
+          <button type="button" class="reveal-btn" data-reveal="cfgKey" aria-label="Show">
+            <svg viewBox="0 0 24 24" fill="none" width="18" height="18"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7"/></svg>
+          </button>
+        </div>
       </div>
       <div class="field">
         <label for="cfgBiz">Business name (shown on receipts)</label>
@@ -130,6 +140,15 @@
       <h3>Data</h3>
       <button class="btn btn-secondary" id="btnRefreshData">Refresh from Google Sheet</button>
       <div class="helper-text">Last synced: <span id="lastSync">never</span></div>
+    </div>
+
+    <div class="settings-card">
+      <h3>Settings PIN</h3>
+      <p class="helper-text" id="pinCardDesc">A PIN keeps this Settings screen locked, so your Apps Script URL and API key aren't visible to anyone who picks up your phone.</p>
+      <div class="btn-row" style="margin-top:10px">
+        <button class="btn btn-secondary" id="btnChangePin">Set / change PIN</button>
+        <button class="btn btn-danger-ghost" id="btnRemovePin">Remove PIN</button>
+      </div>
     </div>
 
     <div class="settings-card">
@@ -321,6 +340,25 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="app.js?v=20260730-2"></script>
+<script src="app.js?v=20260730-3"></script>
+<!-- ===================== SETTINGS PIN LOCK ===================== -->
+<div class="sheet-overlay" id="sheetPinLock">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" id="pinSheetTitle">Enter Settings PIN</div>
+    <p class="helper-text" id="pinSheetHelper" style="margin:-8px 0 16px">Enter your PIN to view Settings.</p>
+    <div class="field">
+      <input type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" id="pinInput" class="mono-input" placeholder="••••" style="text-align:center; font-size:22px; letter-spacing:.3em">
+    </div>
+    <div class="field" id="pinConfirmField" style="display:none">
+      <input type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" id="pinConfirmInput" class="mono-input" placeholder="confirm PIN" style="text-align:center; font-size:22px; letter-spacing:.3em">
+    </div>
+    <p class="helper-text" id="pinError" style="display:none; color:var(--rust)"></p>
+    <button class="btn btn-primary" id="btnPinSubmit">Unlock</button>
+    <button class="btn btn-ghost" id="btnPinCancel" style="margin-top:8px">Cancel</button>
+    <p class="helper-text" style="margin-top:14px">Forgot your PIN? There's no recovery — you'll need to clear this app's storage from your browser/PWA settings, which resets the connection fields here (your Google Sheet data itself is untouched).</p>
+  </div>
+</div>
+
 </body>
 </html>

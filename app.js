@@ -2,9 +2,20 @@
    SAIFULLAH TAMEEM — app logic
    ========================================================== */
 
-const APP_VERSION = "2026-07-30.2";
+const APP_VERSION = "2026-07-30.3";
 const LS_CONFIG = "ll_config";
 const LS_CACHE = "ll_cache";
+const LS_PIN_HASH = "ll_pin_hash";
+
+let settingsUnlocked = false;
+let pinLockMode = "unlock"; // unlock | setup | confirmRemove
+let pinLockThen = null; // callback to run after a successful unlock, used for change/remove flows
+
+async function sha256Hex(text) {
+  const enc = new TextEncoder().encode(text);
+  const buf = await crypto.subtle.digest("SHA-256", enc);
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 let CONFIG = JSON.parse(localStorage.getItem(LS_CONFIG) || "{}");
 let DATA = { properties: [], tenants: [], payments: [] };
@@ -310,6 +321,10 @@ function updatePayBalanceBox() {
 // Navigation
 // ---------------------------------------------------------
 function switchView(name) {
+  if (name === "settings" && localStorage.getItem(LS_PIN_HASH) && !settingsUnlocked) {
+    openPinLock("unlock", () => switchView("settings"));
+    return;
+  }
   currentView = name;
   $$(".view").forEach((v) => v.classList.remove("active"));
   $("#view-" + name).classList.add("active");
@@ -651,6 +666,15 @@ $("#tenantFilter").addEventListener("click", (e) => {
 // ---------------------------------------------------------
 $("#btnSettings").onclick = () => switchView("settings");
 
+$$(".reveal-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const input = $("#" + btn.dataset.reveal);
+    const showing = input.type === "text";
+    input.type = showing ? "password" : "text";
+    btn.classList.toggle("active", !showing);
+  });
+});
+
 function loadConfigIntoForm() {
   $("#cfgUrl").value = CONFIG.apiUrl || "";
   $("#cfgKey").value = CONFIG.apiKey || "";
@@ -671,6 +695,84 @@ $("#btnSaveConfig").onclick = async () => {
 };
 
 $("#btnRefreshData").onclick = () => loadData(true);
+
+// ---------------------------------------------------------
+// Settings PIN lock
+// ---------------------------------------------------------
+function openPinLock(mode, then) {
+  pinLockMode = mode;
+  pinLockThen = then || null;
+  $("#pinInput").value = "";
+  $("#pinConfirmInput").value = "";
+  $("#pinError").style.display = "none";
+  $("#pinConfirmField").style.display = mode === "setup" ? "block" : "none";
+
+  const hasPin = !!localStorage.getItem(LS_PIN_HASH);
+  if (mode === "unlock") {
+    $("#pinSheetTitle").textContent = "Enter Settings PIN";
+    $("#pinSheetHelper").textContent = "Enter your PIN to continue.";
+  } else if (mode === "setup") {
+    $("#pinSheetTitle").textContent = hasPin ? "Set a new PIN" : "Create a Settings PIN";
+    $("#pinSheetHelper").textContent = "Choose a 4–6 digit PIN, then confirm it.";
+  } else if (mode === "confirmRemove") {
+    $("#pinSheetTitle").textContent = "Remove PIN";
+    $("#pinSheetHelper").textContent = "Enter your current PIN to remove the lock.";
+  }
+  openSheet("sheetPinLock");
+  setTimeout(() => $("#pinInput").focus(), 200);
+}
+
+function pinError(msg) {
+  $("#pinError").textContent = msg;
+  $("#pinError").style.display = "block";
+}
+
+$("#btnPinCancel").onclick = () => closeSheet("sheetPinLock");
+
+$("#btnPinSubmit").onclick = async () => {
+  const val = $("#pinInput").value.trim();
+  if (!/^\d{4,6}$/.test(val)) { pinError("PIN must be 4–6 digits."); return; }
+
+  if (pinLockMode === "setup") {
+    const confirmVal = $("#pinConfirmInput").value.trim();
+    if (val !== confirmVal) { pinError("PINs don't match."); return; }
+    localStorage.setItem(LS_PIN_HASH, await sha256Hex(val));
+    settingsUnlocked = true;
+    closeSheet("sheetPinLock");
+    toast("Settings PIN saved.");
+    return;
+  }
+
+  const storedHash = localStorage.getItem(LS_PIN_HASH);
+  const enteredHash = await sha256Hex(val);
+  if (storedHash && enteredHash !== storedHash) { pinError("Incorrect PIN."); return; }
+
+  if (pinLockMode === "confirmRemove") {
+    localStorage.removeItem(LS_PIN_HASH);
+    settingsUnlocked = true;
+    closeSheet("sheetPinLock");
+    toast("PIN removed.");
+    return;
+  }
+
+  // unlock
+  settingsUnlocked = true;
+  closeSheet("sheetPinLock");
+  if (pinLockThen) pinLockThen();
+};
+
+$("#btnChangePin").onclick = () => {
+  if (localStorage.getItem(LS_PIN_HASH) && !settingsUnlocked) {
+    openPinLock("unlock", () => openPinLock("setup"));
+  } else {
+    openPinLock("setup");
+  }
+};
+
+$("#btnRemovePin").onclick = () => {
+  if (!localStorage.getItem(LS_PIN_HASH)) { toast("No PIN is set."); return; }
+  openPinLock("confirmRemove");
+};
 
 // ---------------------------------------------------------
 // Header scroll shadow
