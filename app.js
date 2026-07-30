@@ -2,7 +2,7 @@
    LOT LEDGER — app logic
    ========================================================== */
 
-const APP_VERSION = "2026-07-28.4";
+const APP_VERSION = "2026-07-30.1";
 const LS_CONFIG = "ll_config";
 const LS_CACHE = "ll_cache";
 
@@ -507,68 +507,60 @@ async function generateReceipt({ mode, tenant, amount, date, payMode, note }) {
   const teal = "#1F4A44", rust = "#BA4A24", green = "#2F7A4F", ink = "#16233A",
     inkSoft = "#5B6478", cream = "#FDFDFB", line = "#E1E3DA";
 
+  const stampText = isPaid ? (b.balance > 0 ? "PARTIAL" : "PAID") : (b.balance > 0 ? "DUE" : "CLEAR");
+
   // background
   ctx.fillStyle = cream;
   roundRect(ctx, 0, 0, W, H, 26); ctx.fill();
 
-  // header band
+  // teal hero panel — inset card holding identity, stamp and the big amount
+  const panelX = 20, panelY = 20, panelW = W - 40, panelH = 400;
   ctx.fillStyle = teal;
-  ctx.beginPath();
-  ctx.moveTo(26, 0); ctx.lineTo(W - 26, 0);
-  ctx.arcTo(W, 0, W, 26, 26); ctx.lineTo(W, 210);
-  ctx.lineTo(0, 210); ctx.lineTo(0, 26); ctx.arcTo(0, 0, 26, 0, 26);
-  ctx.closePath(); ctx.fill();
+  roundRect(ctx, panelX, panelY, panelW, panelH, 20); ctx.fill();
 
   ctx.fillStyle = "rgba(255,255,255,.75)";
   ctx.font = "600 20px Inter";
-  ctx.fillText((CONFIG.bizName || "Lot Ledger"), 40, 60);
+  ctx.fillText((CONFIG.bizName || "Lot Ledger"), panelX + 24, panelY + 44);
   ctx.font = "500 15px Inter";
-  if (CONFIG.bizPhone) ctx.fillText(CONFIG.bizPhone, 40, 84);
+  if (CONFIG.bizPhone) ctx.fillText(CONFIG.bizPhone, panelX + 24, panelY + 68);
 
   ctx.fillStyle = "#fff";
-  ctx.font = "600 24px 'Space Grotesk'";
-  ctx.fillText(isPaid ? "PAYMENT RECEIPT" : "BALANCE STATEMENT", 40, 130);
+  ctx.font = "600 22px 'Space Grotesk'";
+  ctx.fillText(isPaid ? "PAYMENT RECEIPT" : "BALANCE STATEMENT", panelX + 24, panelY + 116);
 
-  ctx.fillStyle = "rgba(255,255,255,.85)";
+  ctx.fillStyle = "rgba(255,255,255,.8)";
   ctx.font = "500 14px 'IBM Plex Mono'";
-  ctx.fillText((isPaid ? "Received on " : "As of ") + (date || todayStr()), 40, 160);
+  ctx.fillText((isPaid ? "Received on " : "As of ") + (date || todayStr()), panelX + 24, panelY + 144);
 
-  // status stamp circle
+  // status stamp circle, top-right of the panel
   ctx.save();
-  ctx.translate(W - 100, 105);
+  ctx.translate(panelX + panelW - 66, panelY + 62);
   ctx.rotate(-0.18);
   ctx.strokeStyle = "rgba(255,255,255,.55)";
   ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.arc(0, 0, 46, 0, Math.PI * 2); ctx.stroke();
-  ctx.fillStyle = "rgba(255,255,255,.9)";
-  ctx.font = "700 15px Inter";
+  ctx.beginPath(); ctx.arc(0, 0, 42, 0, Math.PI * 2); ctx.stroke();
+  ctx.fillStyle = "rgba(255,255,255,.92)";
+  ctx.font = "700 14px Inter";
   ctx.textAlign = "center";
-  const stampText = isPaid ? (b.balance > 0 ? "PARTIAL" : "PAID") : (b.balance > 0 ? "DUE" : "CLEAR");
-  ctx.fillText(stampText, 0, 6);
+  ctx.fillText(stampText, 0, 5);
   ctx.textAlign = "left";
   ctx.restore();
 
-  // perforation dots between header and body
-  ctx.fillStyle = cream;
-  for (let x = 30; x < W - 20; x += 22) {
-    ctx.beginPath(); ctx.arc(x, 210, 7, 0, Math.PI * 2); ctx.fill();
-  }
+  // divider inside the panel
+  ctx.strokeStyle = "rgba(255,255,255,.18)"; ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(panelX + 24, panelY + 176); ctx.lineTo(panelX + panelW - 24, panelY + 176);
+  ctx.stroke();
 
-  let y = 250;
-  // Big amount
-  ctx.fillStyle = ink;
+  // Big amount, hero of the panel
+  ctx.fillStyle = "rgba(255,255,255,.75)";
   ctx.font = "500 15px Inter";
-  ctx.fillText(isPaid ? "Amount received" : "Total amount due", 40, y);
-  y += 44;
-  ctx.font = "700 52px 'IBM Plex Mono'";
-  ctx.fillStyle = isPaid ? green : (b.balance > 0 ? rust : green);
-  ctx.fillText(fmt(isPaid ? amount : Math.max(b.balance, 0)), 40, y);
-  y += 40;
+  ctx.fillText(isPaid ? "Amount received" : "Total amount due", panelX + 24, panelY + 224);
+  ctx.fillStyle = "#fff";
+  ctx.font = "700 56px 'IBM Plex Mono'";
+  ctx.fillText(fmt(isPaid ? amount : Math.max(b.balance, 0)), panelX + 24, panelY + 290);
 
-  // divider
-  ctx.strokeStyle = line; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.moveTo(40, y); ctx.lineTo(W - 40, y); ctx.stroke();
-  y += 36;
+  let y = panelY + panelH + 46;
 
   // detail rows
   const rows = [];
