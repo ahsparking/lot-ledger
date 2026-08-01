@@ -2,7 +2,7 @@
    SAIFULLAH TAMEEM — app logic
    ========================================================== */
 
-const APP_VERSION = "2026-07-30.3";
+const APP_VERSION = "2026-08-01.1";
 const LS_CONFIG = "ll_config";
 const LS_CACHE = "ll_cache";
 const LS_PIN_HASH = "ll_pin_hash";
@@ -18,6 +18,26 @@ async function sha256Hex(text) {
 }
 
 let CONFIG = JSON.parse(localStorage.getItem(LS_CONFIG) || "{}");
+
+// If opened via a saved "setup link" (?apiUrl=...&apiKey=...), restore config from it.
+// This is a safety net for browsers/devices that clear localStorage between sessions.
+(function restoreConfigFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const urlFromLink = params.get("apiUrl");
+  const keyFromLink = params.get("apiKey");
+  if (urlFromLink && keyFromLink) {
+    CONFIG = {
+      apiUrl: urlFromLink,
+      apiKey: keyFromLink,
+      bizName: params.get("biz") || CONFIG.bizName || "",
+      bizPhone: params.get("phone") || CONFIG.bizPhone || ""
+    };
+    localStorage.setItem(LS_CONFIG, JSON.stringify(CONFIG));
+    if (window.history && window.history.replaceState) {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }
+})();
 let DATA = { properties: [], tenants: [], payments: [] };
 let currentView = "dashboard";
 let activeTenantId = null;
@@ -695,6 +715,25 @@ $("#btnSaveConfig").onclick = async () => {
 };
 
 $("#btnRefreshData").onclick = () => loadData(true);
+
+$("#btnCopySetupLink").onclick = async () => {
+  if (!CONFIG.apiUrl || !CONFIG.apiKey) {
+    toast("Save & connect first, then copy the link");
+    return;
+  }
+  const url = new URL(window.location.href.split("?")[0]);
+  url.searchParams.set("apiUrl", CONFIG.apiUrl);
+  url.searchParams.set("apiKey", CONFIG.apiKey);
+  if (CONFIG.bizName) url.searchParams.set("biz", CONFIG.bizName);
+  if (CONFIG.bizPhone) url.searchParams.set("phone", CONFIG.bizPhone);
+  const link = url.toString();
+  try {
+    await navigator.clipboard.writeText(link);
+    toast("Link copied — bookmark it or Add to Home Screen from it");
+  } catch (e) {
+    prompt("Copy this link and save it as a bookmark:", link);
+  }
+};
 
 // ---------------------------------------------------------
 // Settings PIN lock

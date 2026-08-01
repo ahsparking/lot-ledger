@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260730-3">
+<link rel="stylesheet" href="style.css?v=20260801-1">
 </head>
 <body>
 
@@ -134,6 +134,8 @@
       </div>
       <button class="btn btn-primary" id="btnSaveConfig">Save & connect</button>
       <div class="helper-text" id="connStatus">Not connected yet.</div>
+      <button class="btn btn-secondary" id="btnCopySetupLink" style="margin-top:10px">Copy bookmarkable setup link</button>
+      <p class="helper-text">If your browser keeps forgetting your connection, save this link as a bookmark (or Add to Home Screen from it) instead of the plain URL — it has your connection baked in, so opening it always reconnects automatically, even after storage is cleared.</p>
     </div>
 
     <div class="settings-card">
@@ -340,7 +342,6 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="app.js?v=20260730-3"></script>
 <!-- ===================== SETTINGS PIN LOCK ===================== -->
 <div class="sheet-overlay" id="sheetPinLock">
   <div class="sheet">
@@ -360,5 +361,6 @@
   </div>
 </div>
 
+<script src="app.js?v=20260801-1"></script>
 </body>
 </html>
