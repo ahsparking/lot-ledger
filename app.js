@@ -2,7 +2,7 @@
    SAIFULLAH TAMEEM — app logic
    ========================================================== */
 
-const APP_VERSION = "2026-08-01.4";
+const APP_VERSION = "2026-08-01.5";
 const LS_CONFIG = "ll_config";
 const LS_CACHE = "ll_cache";
 const LS_PIN_HASH = "ll_pin_hash";
@@ -46,7 +46,21 @@ let lastReceiptCanvasBlobUrl = null;
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const fmt = (n) => "₹" + Math.round(Math.abs(n)).toLocaleString("en-IN");
-const todayStr = () => new Date().toISOString().slice(0, 10);
+
+// ---------------------------------------------------------
+// Timezone-safe date helpers.
+// IMPORTANT: never use `.toISOString()` for calendar-date math — it converts
+// to UTC, which silently rolls dates back a day for anyone in a positive
+// UTC-offset timezone (e.g. India, UTC+5:30). Everything below stays in
+// local time throughout, so "July 1st" always means July 1st.
+// ---------------------------------------------------------
+function pad2(n) { return String(n).padStart(2, "0"); }
+function toDateStr(d) { return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }
+function parseDateStr(s) {
+  const [y, m, d] = s.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+const todayStr = () => toDateStr(new Date());
 
 // ---------------------------------------------------------
 // Toast
@@ -121,16 +135,16 @@ function setConnStatus(ok, msg) {
 // Balance computation
 // ---------------------------------------------------------
 function monthsBetweenInclusive(startStr, endStr) {
-  const s = new Date(startStr), e = new Date(endStr);
+  const s = parseDateStr(startStr), e = parseDateStr(endStr);
   if (isNaN(s.getTime()) || isNaN(e.getTime()) || e < s) return 0;
   const months = (e.getFullYear() - s.getFullYear()) * 12 + (e.getMonth() - s.getMonth()) + 1;
   return Math.max(months, 0);
 }
 
 function dayBefore(dateStr) {
-  const d = new Date(dateStr);
+  const d = parseDateStr(dateStr);
   d.setDate(d.getDate() - 1);
-  return d.toISOString().slice(0, 10);
+  return toDateStr(d);
 }
 
 function tenantPayments(tenantId) {
@@ -147,9 +161,9 @@ function currentRent(t) {
 }
 
 function firstOfNextMonth(dateStr) {
-  const d = new Date(dateStr);
+  const d = parseDateStr(dateStr);
   const n = new Date(d.getFullYear(), d.getMonth() + 1, 1);
-  return n.toISOString().slice(0, 10);
+  return toDateStr(n);
 }
 
 // "2026-07" -> "July 2026"
