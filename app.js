@@ -2,7 +2,7 @@
    SAIFULLAH TAMEEM — app logic
    ========================================================== */
 
-const APP_VERSION = "2026-08-01.1";
+const APP_VERSION = "2026-08-01.4";
 const LS_CONFIG = "ll_config";
 const LS_CACHE = "ll_cache";
 const LS_PIN_HASH = "ll_pin_hash";
@@ -152,18 +152,35 @@ function firstOfNextMonth(dateStr) {
   return n.toISOString().slice(0, 10);
 }
 
-function lastDayOfPreviousMonth(dateStr) {
-  const d = new Date(dateStr);
-  const n = new Date(d.getFullYear(), d.getMonth(), 0); // day 0 = last day of the prior month
-  return n.toISOString().slice(0, 10);
+// "2026-07" -> "July 2026"
+function monthLabel(yyyymm) {
+  if (!yyyymm) return "";
+  const [y, m] = yyyymm.split("-").map(Number);
+  const names = ["January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"];
+  return names[m - 1] + " " + y;
+}
+
+// "2026-07" -> "2026" full year quick-glance format used in pill tags
+function monthShort(yyyymm) {
+  if (!yyyymm) return "";
+  const [y, m] = yyyymm.split("-").map(Number);
+  const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return names[m - 1] + " " + y;
+}
+
+function previousMonthValue() {
+  const d = new Date();
+  d.setDate(1);
+  d.setMonth(d.getMonth() - 1);
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
 }
 
 function tenantBalance(t) {
   const today = todayStr();
-  // Rent for a month is only "due" once that month has fully ended (arrears billing) —
-  // so the in-progress current month never shows up as owed yet.
-  const arrearsCap = lastDayOfPreviousMonth(today);
-  const endCap = (t.AgreementEnd && t.AgreementEnd < today) ? t.AgreementEnd : arrearsCap;
+  // Advance billing: a month's rent counts as due as soon as that month starts
+  // (not after it ends) — matches how rent is actually charged here.
+  const endCap = (t.AgreementEnd && t.AgreementEnd < today) ? t.AgreementEnd : today;
 
   const hasOpening = t.OpeningBalance !== undefined && t.OpeningBalance !== "" && t.OpeningBalanceDate;
   const openingAmt = hasOpening ? Number(t.OpeningBalance) || 0 : 0;
@@ -351,6 +368,7 @@ function switchView(name) {
   $$(".nav-item").forEach((b) => b.classList.toggle("active", b.dataset.nav === name));
   if (name === "add") {
     $("#payDate").value = todayStr();
+    if (!$("#payPeriod").value) $("#payPeriod").value = previousMonthValue();
     renderPayTenantOptions();
   }
   window.scrollTo(0, 0);
@@ -404,7 +422,8 @@ function openTenantProfile(id) {
   pays.forEach((p) => {
     const row = document.createElement("div");
     row.className = "pay-row";
-    row.innerHTML = `<div><div>${p.Mode || "Payment"}${p.Note ? " · " + p.Note : ""}</div><div class="pr-date">${p.Date}</div></div><div class="pr-amt">${fmt(p.Amount)}</div>`;
+    const periodTag = p.Period ? " · " + monthShort(p.Period) : "";
+    row.innerHTML = `<div><div>${p.Mode || "Payment"}${periodTag}${p.Note ? " · " + p.Note : ""}</div><div class="pr-date">${p.Date}</div></div><div class="pr-amt">${fmt(p.Amount)}</div>`;
     hist.appendChild(row);
   });
   openSheet("sheetTenant");
@@ -515,15 +534,16 @@ $("#btnSavePayment").onclick = async () => {
   const tenantId = $("#payTenant").value;
   const amount = Number($("#payAmount").value);
   const date = $("#payDate").value || todayStr();
+  const period = $("#payPeriod").value;
   if (!tenantId) return toast("Add a tenant first");
   if (!amount || amount <= 0) return toast("Enter a valid amount");
   try {
-    await api("addPayment", { tenantId, amount, date, mode: $("#payMode").value, note: $("#payNote").value });
+    await api("addPayment", { tenantId, amount, date, period, mode: $("#payMode").value, note: $("#payNote").value });
     await loadData();
     toast("Payment saved");
     const t = DATA.tenants.find((x) => x.ID === tenantId);
-    generateReceipt({ mode: "payment", tenant: t, amount, date, payMode: $("#payMode").value, note: $("#payNote").value });
-    $("#payAmount").value = ""; $("#payNote").value = "";
+    generateReceipt({ mode: "payment", tenant: t, amount, date, period, payMode: $("#payMode").value, note: $("#payNote").value });
+    $("#payAmount").value = ""; $("#payNote").value = ""; $("#payPeriod").value = "";
     switchView("dashboard");
   } catch (e) { toast(e.message); }
 };
@@ -531,106 +551,164 @@ $("#btnSavePayment").onclick = async () => {
 // ---------------------------------------------------------
 // Receipt / statement image generation (canvas)
 // ---------------------------------------------------------
-async function generateReceipt({ mode, tenant, amount, date, payMode, note }) {
+function drawCheckIcon(ctx, cx, cy, r) {
+  ctx.beginPath();
+  ctx.moveTo(cx - r * 0.45, cy + r * 0.02);
+  ctx.lineTo(cx - r * 0.12, cy + r * 0.35);
+  ctx.lineTo(cx + r * 0.48, cy - r * 0.32);
+  ctx.strokeStyle = "#fff";
+  ctx.lineWidth = r * 0.16;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.stroke();
+}
+
+function drawAlertIcon(ctx, cx, cy, r) {
+  ctx.strokeStyle = "#fff";
+  ctx.lineWidth = r * 0.16;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - r * 0.42);
+  ctx.lineTo(cx, cy + r * 0.12);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(cx, cy + r * 0.4, r * 0.06, 0, Math.PI * 2);
+  ctx.fillStyle = "#fff";
+  ctx.fill();
+}
+
+async function generateReceipt({ mode, tenant, amount, date, period, payMode, note }) {
   await document.fonts.ready;
   const canvas = $("#receiptCanvas");
   const ctx = canvas.getContext("2d");
   const W = canvas.width, H = canvas.height;
   const b = tenantBalance(tenant);
   const isPaid = mode === "payment";
+  const cleared = isPaid ? b.balance <= 0 : b.balance <= 0;
 
-  const teal = "#1F4A44", rust = "#BA4A24", green = "#2F7A4F", ink = "#16233A",
-    inkSoft = "#5B6478", cream = "#FDFDFB", line = "#E1E3DA";
+  const ink = "#16233A", inkSoft = "#5B6478", white = "#FFFFFF",
+    line = "#E7E4DC", footerBg = "#F3F1EA";
+  const themeA = isPaid ? "#28685F" : "#C24A22";
+  const themeB = isPaid ? "#123832" : "#8C2E13";
+  const iconColor = isPaid ? "#2F9E6E" : "#D9412A";
 
-  const stampText = isPaid ? (b.balance > 0 ? "PARTIAL" : "PAID") : (b.balance > 0 ? "DUE" : "CLEAR");
+  // ---- full-bleed gradient background ----
+  const grad = ctx.createLinearGradient(0, 0, W, H);
+  grad.addColorStop(0, themeA);
+  grad.addColorStop(1, themeB);
+  ctx.fillStyle = grad;
+  roundRect(ctx, 0, 0, W, H, 34); ctx.fill();
 
-  // background
-  ctx.fillStyle = cream;
-  roundRect(ctx, 0, 0, W, H, 26); ctx.fill();
-
-  // teal hero panel — inset card holding identity, stamp and the big amount
-  const panelX = 20, panelY = 20, panelW = W - 40, panelH = 400;
-  ctx.fillStyle = teal;
-  roundRect(ctx, panelX, panelY, panelW, panelH, 20); ctx.fill();
-
-  ctx.fillStyle = "rgba(255,255,255,.75)";
-  ctx.font = "600 20px Inter";
-  ctx.fillText((CONFIG.bizName || "Saifullah Tameem"), panelX + 24, panelY + 44);
-  ctx.font = "500 15px Inter";
-  if (CONFIG.bizPhone) ctx.fillText(CONFIG.bizPhone, panelX + 24, panelY + 68);
-
-  ctx.fillStyle = "#fff";
-  ctx.font = "600 22px 'Space Grotesk'";
-  ctx.fillText(isPaid ? "PAYMENT RECEIPT" : "BALANCE STATEMENT", panelX + 24, panelY + 116);
-
-  ctx.fillStyle = "rgba(255,255,255,.8)";
-  ctx.font = "500 14px 'IBM Plex Mono'";
-  ctx.fillText((isPaid ? "Received on " : "As of ") + (date || todayStr()), panelX + 24, panelY + 144);
-
-  // status stamp circle, top-right of the panel
-  ctx.save();
-  ctx.translate(panelX + panelW - 66, panelY + 62);
-  ctx.rotate(-0.18);
-  ctx.strokeStyle = "rgba(255,255,255,.55)";
-  ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.arc(0, 0, 42, 0, Math.PI * 2); ctx.stroke();
-  ctx.fillStyle = "rgba(255,255,255,.92)";
-  ctx.font = "700 14px Inter";
-  ctx.textAlign = "center";
-  ctx.fillText(stampText, 0, 5);
-  ctx.textAlign = "left";
-  ctx.restore();
-
-  // divider inside the panel
-  ctx.strokeStyle = "rgba(255,255,255,.18)"; ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(panelX + 24, panelY + 176); ctx.lineTo(panelX + panelW - 24, panelY + 176);
-  ctx.stroke();
-
-  // Big amount, hero of the panel
-  ctx.fillStyle = "rgba(255,255,255,.75)";
-  ctx.font = "500 15px Inter";
-  ctx.fillText(isPaid ? "Amount received" : "Total amount due", panelX + 24, panelY + 224);
-  ctx.fillStyle = "#fff";
-  ctx.font = "700 56px 'IBM Plex Mono'";
-  ctx.fillText(fmt(isPaid ? amount : Math.max(b.balance, 0)), panelX + 24, panelY + 290);
-
-  let y = panelY + panelH + 46;
-
-  // detail rows
-  const rows = [];
-  rows.push(["Tenant", tenant.Name]);
-  rows.push(["Lot / spot", `${propertyName(tenant.PropertyID)} · ${tenant.SpotLabel || "—"}`]);
-  rows.push(["Monthly rent", fmt(currentRent(tenant))]);
-  if (isPaid) {
-    rows.push(["Mode", payMode || "—"]);
-    if (note) rows.push(["Note", note]);
-  }
-  rows.push([isPaid ? "Balance after payment" : "Balance", b.balance > 0 ? fmt(b.balance) + " due" : "Settled"]);
-
-  ctx.font = "500 16px Inter";
-  rows.forEach(([k, v]) => {
-    ctx.fillStyle = inkSoft;
-    ctx.fillText(k, 40, y);
-    ctx.fillStyle = ink;
-    ctx.font = "600 16px Inter";
-    const vw = ctx.measureText(v).width;
-    ctx.fillText(v, W - 40 - vw, y);
-    ctx.font = "500 16px Inter";
-    y += 38;
+  // subtle decorative corner arcs
+  ctx.strokeStyle = "rgba(255,255,255,.12)"; ctx.lineWidth = 2;
+  [[0, 0], [W, H]].forEach(([cx, cy]) => {
+    for (let r = 40; r <= 160; r += 40) {
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+    }
   });
 
-  y += 10;
-  ctx.strokeStyle = line;
-  ctx.setLineDash([6, 6]);
-  ctx.beginPath(); ctx.moveTo(40, y); ctx.lineTo(W - 40, y); ctx.stroke();
-  ctx.setLineDash([]);
-  y += 34;
+  // ---- icon circle, sitting on the gradient above the card ----
+  const iconCx = W / 2, iconCy = 96, iconR = 44;
+  ctx.beginPath(); ctx.arc(iconCx, iconCy, iconR, 0, Math.PI * 2);
+  ctx.fillStyle = iconColor; ctx.fill();
+  if (isPaid) drawCheckIcon(ctx, iconCx, iconCy, iconR);
+  else drawAlertIcon(ctx, iconCx, iconCy, iconR);
 
+  // ---- white card ----
+  const cardX = 36, cardY = 160, cardW = W - 72, cardH = 660;
+  ctx.fillStyle = white;
+  roundRect(ctx, cardX, cardY, cardW, cardH, 24); ctx.fill();
+
+  ctx.textAlign = "center";
+
+  // headline
+  ctx.fillStyle = ink;
+  ctx.font = "600 25px 'Space Grotesk'";
+  ctx.fillText(isPaid ? "Paid successfully!" : "Payment due", W / 2, cardY + 56);
+
+  // big amount
+  ctx.fillStyle = isPaid ? "#1F4A44" : "#BA4A24";
+  ctx.font = "700 50px 'IBM Plex Mono'";
+  ctx.fillText(fmt(isPaid ? amount : Math.max(b.balance, 0)), W / 2, cardY + 122);
+
+  // rent period pill
+  const pillText = period ? "Rent · " + monthShort(period) : (isPaid ? "Received " + (date || todayStr()) : "As of " + todayStr());
+  ctx.font = "600 14px Inter";
+  const pillW = ctx.measureText(pillText).width + 36;
+  const pillX = W / 2 - pillW / 2, pillY = cardY + 148, pillH = 34;
+  ctx.fillStyle = "#F0EFE7";
+  roundRect(ctx, pillX, pillY, pillW, pillH, 17); ctx.fill();
   ctx.fillStyle = inkSoft;
-  ctx.font = "500 13px 'IBM Plex Mono'";
-  ctx.fillText("Generated by Saifullah Tameem · " + new Date().toLocaleString("en-IN"), 40, H - 30);
+  ctx.fillText(pillText, W / 2, pillY + 22);
 
+  // "To" section — who the money goes to
+  let y = cardY + 224;
+  ctx.font = "600 11px Inter";
+  ctx.fillStyle = "#9AA0AC";
+  ctx.fillText(isPaid ? "PAID TO" : "OWED TO", W / 2, y);
+  y += 28;
+  ctx.font = "700 19px Inter";
+  ctx.fillStyle = ink;
+  ctx.fillText(CONFIG.bizName || "Lot Ledger", W / 2, y);
+  if (CONFIG.bizPhone) {
+    y += 24;
+    ctx.font = "500 14px Inter";
+    ctx.fillStyle = inkSoft;
+    ctx.fillText(CONFIG.bizPhone, W / 2, y);
+  }
+
+  // perforated divider with ticket-style notches cut into the card's edges
+  const dividerY = cardY + 300;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cardX, dividerY, 14, 0, Math.PI * 2);
+  ctx.arc(cardX + cardW, dividerY, 14, 0, Math.PI * 2);
+  ctx.fillStyle = grad;
+  ctx.fill();
+  ctx.restore();
+  ctx.strokeStyle = line; ctx.lineWidth = 2; ctx.setLineDash([7, 7]);
+  ctx.beginPath(); ctx.moveTo(cardX + 24, dividerY); ctx.lineTo(cardX + cardW - 24, dividerY); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // footer area (light gray) — who the money is from + meta
+  roundRect(ctx, cardX, dividerY, cardW, cardY + cardH - dividerY, 24);
+  ctx.save(); ctx.clip();
+  ctx.fillStyle = footerBg;
+  ctx.fillRect(cardX, dividerY, cardW, cardY + cardH - dividerY);
+  ctx.restore();
+
+  y = dividerY + 46;
+  ctx.font = "600 11px Inter";
+  ctx.fillStyle = "#9AA0AC";
+  ctx.fillText(isPaid ? "FROM" : "TENANT", W / 2, y);
+  y += 26;
+  ctx.font = "700 18px Inter";
+  ctx.fillStyle = ink;
+  ctx.fillText(tenant.Name, W / 2, y);
+  y += 24;
+  ctx.font = "500 14px Inter";
+  ctx.fillStyle = inkSoft;
+  ctx.fillText(`${propertyName(tenant.PropertyID)} · Spot ${tenant.SpotLabel || "—"}`, W / 2, y);
+
+  y += 44;
+  ctx.strokeStyle = "#E0DED4"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(cardX + 50, y); ctx.lineTo(cardX + cardW - 50, y); ctx.stroke();
+
+  y += 34;
+  ctx.font = "500 13px 'IBM Plex Mono'";
+  ctx.fillStyle = inkSoft;
+  const timeLabel = isPaid
+    ? "Paid at " + new Date((date || todayStr()) + "T00:00:00").toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+    : "Generated " + new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  ctx.fillText(timeLabel, W / 2, y);
+  y += 22;
+  ctx.fillText((isPaid ? "Mode: " + (payMode || "—") : "Balance: " + (b.balance > 0 ? fmt(b.balance) + " due" : "Settled")), W / 2, y);
+  if (isPaid && note) {
+    y += 22;
+    ctx.fillText("Note: " + note, W / 2, y);
+  }
+
+  ctx.textAlign = "left";
   $("#receiptTitle").textContent = isPaid ? "Payment receipt" : "Balance statement";
   openSheet("sheetReceipt");
 }
@@ -649,24 +727,44 @@ $("#btnCloseReceipt").onclick = () => closeSheet("sheetReceipt");
 
 $("#btnDownloadReceipt").onclick = () => {
   const canvas = $("#receiptCanvas");
-  const a = document.createElement("a");
-  a.download = "receipt-" + Date.now() + ".png";
-  a.href = canvas.toDataURL("image/png");
-  a.click();
+  canvas.toBlob((blob) => {
+    if (!blob) { toast("Couldn't prepare the image — try again"); return; }
+    const url = URL.createObjectURL(blob);
+
+    // Try a real one-tap download first (works on desktop and most Android browsers).
+    const a = document.createElement("a");
+    a.download = "receipt-" + Date.now() + ".png";
+    a.href = url;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    // Many mobile browsers (iOS Safari, in-app browsers, etc.) silently ignore
+    // that download attribute, so always also open the image directly —
+    // long-press (mobile) or right-click (desktop) on it reliably saves it
+    // everywhere, no matter what just happened above.
+    window.open(url, "_blank");
+    toast("Image opened — press and hold it (or right-click) to save");
+  }, "image/png");
 };
 
 $("#btnShareReceipt").onclick = async () => {
   const canvas = $("#receiptCanvas");
   canvas.toBlob(async (blob) => {
+    if (!blob) { toast("Couldn't prepare the image — try again"); return; }
     const file = new File([blob], "receipt.png", { type: "image/png" });
     if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-      try { await navigator.share({ files: [file], title: "Rent receipt" }); }
-      catch (e) { /* user cancelled */ }
-    } else {
-      const a = document.createElement("a");
-      a.download = "receipt.png"; a.href = URL.createObjectURL(blob); a.click();
-      toast("Sharing isn't supported here — downloaded instead");
+      try {
+        await navigator.share({ files: [file], title: "Rent receipt" });
+        return;
+      } catch (e) {
+        if (e && e.name === "AbortError") return; // user cancelled the share sheet, do nothing
+        // fall through to the backup method below for any real error
+      }
     }
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank");
+    toast("Image opened — press and hold it to share or save");
   }, "image/png");
 };
 

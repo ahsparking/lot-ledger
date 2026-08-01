@@ -33,7 +33,7 @@ function setup() {
 
   var payments = ss.getSheetByName(SHEET_PAYMENTS) || ss.insertSheet(SHEET_PAYMENTS);
   if (payments.getLastRow() === 0) {
-    payments.appendRow(["ID", "TenantID", "Date", "Amount", "Mode", "Note"]);
+    payments.appendRow(["ID", "TenantID", "Date", "Amount", "Mode", "Note", "Period"]);
   }
 
   // Remove the default "Sheet1" if it's still empty and unused
@@ -60,6 +60,20 @@ function migrateAddTenantColumns() {
     }
   });
   Logger.log(added.length ? "Added columns: " + added.join(", ") : "Nothing to add — already up to date.");
+}
+
+// ---------- Run this ONCE if you deployed before "Rent period" existed ----------
+// Adds the Period column to your existing Payments sheet without touching data.
+function migrateAddPaymentColumns() {
+  var sheet = getSheet(SHEET_PAYMENTS);
+  var lastCol = sheet.getLastColumn();
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  if (headers.indexOf("Period") === -1) {
+    sheet.getRange(1, lastCol + 1).setValue("Period");
+    Logger.log("Added column: Period");
+  } else {
+    Logger.log("Nothing to add — already up to date.");
+  }
 }
 
 // ---------- Web app entry points ----------
@@ -210,15 +224,21 @@ function updateTenant(data) {
 
 function addPayment(data) {
   var sheet = getSheet(SHEET_PAYMENTS);
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   var id = nextId("PMT", sheet);
-  sheet.appendRow([
-    id,
-    data.tenantId,
-    data.date,
-    Number(data.amount) || 0,
-    data.mode || "",
-    data.note || ""
-  ]);
+  var values = {
+    ID: id,
+    TenantID: data.tenantId,
+    Date: data.date,
+    Amount: Number(data.amount) || 0,
+    Mode: data.mode || "",
+    Note: data.note || "",
+    Period: data.period || ""
+  };
+  var row = headers.map(function (h) {
+    return values.hasOwnProperty(h) ? values[h] : "";
+  });
+  sheet.appendRow(row);
   return { ok: true, id: id };
 }
 
