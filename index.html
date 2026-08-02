@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
 <meta name="theme-color" content="#1F4A44">
-<title>Saifullah Tameem — Parking Rent Tracker</title>
+<title>Lot Ledger — Parking Rent Tracker</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260801-5">
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 
@@ -21,7 +21,7 @@
   <div class="brand">
     <div class="brand-mark">P</div>
     <div>
-      <div class="brand-name">Saifullah Tameem</div>
+      <div class="brand-name">Lot Ledger</div>
       <div class="brand-sub" id="headerSub">Parking & bike-stand rent</div>
     </div>
   </div>
@@ -85,11 +85,6 @@
       </div>
     </div>
     <div class="field">
-      <label for="payPeriod">Rent period (optional)</label>
-      <input type="month" id="payPeriod">
-      <p class="helper-text" style="margin-top:6px">Which month this payment is for — shown on the receipt (e.g. "Rent · July 2026"). Leave blank to just show the payment date instead.</p>
-    </div>
-    <div class="field">
       <label for="payMode">Mode</label>
       <select id="payMode">
         <option>Cash</option>
@@ -113,21 +108,11 @@
       <h3>Google Sheet connection</h3>
       <div class="field">
         <label for="cfgUrl">Apps Script Web App URL</label>
-        <div class="field-reveal">
-          <input type="password" id="cfgUrl" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off">
-          <button type="button" class="reveal-btn" data-reveal="cfgUrl" aria-label="Show">
-            <svg viewBox="0 0 24 24" fill="none" width="18" height="18"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7"/></svg>
-          </button>
-        </div>
+        <input type="text" id="cfgUrl" placeholder="https://script.google.com/macros/s/…/exec">
       </div>
       <div class="field">
         <label for="cfgKey">API key</label>
-        <div class="field-reveal">
-          <input type="password" id="cfgKey" placeholder="the key you set in Code.gs" autocomplete="off">
-          <button type="button" class="reveal-btn" data-reveal="cfgKey" aria-label="Show">
-            <svg viewBox="0 0 24 24" fill="none" width="18" height="18"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7"/></svg>
-          </button>
-        </div>
+        <input type="text" id="cfgKey" placeholder="the key you set in Code.gs">
       </div>
       <div class="field">
         <label for="cfgBiz">Business name (shown on receipts)</label>
@@ -139,8 +124,6 @@
       </div>
       <button class="btn btn-primary" id="btnSaveConfig">Save & connect</button>
       <div class="helper-text" id="connStatus">Not connected yet.</div>
-      <button class="btn btn-secondary" id="btnCopySetupLink" style="margin-top:10px">Copy bookmarkable setup link</button>
-      <p class="helper-text">If your browser keeps forgetting your connection, save this link as a bookmark (or Add to Home Screen from it) instead of the plain URL — it has your connection baked in, so opening it always reconnects automatically, even after storage is cleared.</p>
     </div>
 
     <div class="settings-card">
@@ -150,21 +133,8 @@
     </div>
 
     <div class="settings-card">
-      <h3>Settings PIN</h3>
-      <p class="helper-text" id="pinCardDesc">A PIN keeps this Settings screen locked, so your Apps Script URL and API key aren't visible to anyone who picks up your phone.</p>
-      <div class="btn-row" style="margin-top:10px">
-        <button class="btn btn-secondary" id="btnChangePin">Set / change PIN</button>
-        <button class="btn btn-danger-ghost" id="btnRemovePin">Remove PIN</button>
-      </div>
-    </div>
-
-    <div class="settings-card">
       <h3>First time here?</h3>
       <p class="helper-text">Open SETUP.md (included in your download) for the 5-minute steps to connect your Google Sheet.</p>
-    </div>
-
-    <div class="settings-card">
-      <p class="helper-text">App build: <span id="appVersion" class="mono"></span> — if this doesn't match the version you were told to expect, your phone is showing a cached/old copy. Reload the page (not the installed icon) and try again.</p>
     </div>
   </section>
 
@@ -213,6 +183,16 @@
     <div class="pay-history" id="tpHistory"></div>
     <div style="height:6px"></div>
     <button class="btn btn-ghost" id="tpBtnEdit">Edit tenant details</button>
+  </div>
+</div>
+<!-- Place this right after <div class="sheet-overlay" id="sheetTenant">...</div> -->
+<div class="sheet-overlay" id="sheetMonthwise">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" id="mwTitle">Month-wise Breakdown</div>
+    <div id="mwContent"></div>
+    <div style="height:12px"></div>
+    <button class="btn btn-ghost" onclick="closeSheet('sheetMonthwise')">Close</button>
   </div>
 </div>
 
@@ -347,25 +327,6 @@
 
 <div class="toast" id="toast"></div>
 
-<!-- ===================== SETTINGS PIN LOCK ===================== -->
-<div class="sheet-overlay" id="sheetPinLock">
-  <div class="sheet">
-    <div class="sheet-handle"></div>
-    <div class="sheet-title" id="pinSheetTitle">Enter Settings PIN</div>
-    <p class="helper-text" id="pinSheetHelper" style="margin:-8px 0 16px">Enter your PIN to view Settings.</p>
-    <div class="field">
-      <input type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" id="pinInput" class="mono-input" placeholder="••••" style="text-align:center; font-size:22px; letter-spacing:.3em">
-    </div>
-    <div class="field" id="pinConfirmField" style="display:none">
-      <input type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" id="pinConfirmInput" class="mono-input" placeholder="confirm PIN" style="text-align:center; font-size:22px; letter-spacing:.3em">
-    </div>
-    <p class="helper-text" id="pinError" style="display:none; color:var(--rust)"></p>
-    <button class="btn btn-primary" id="btnPinSubmit">Unlock</button>
-    <button class="btn btn-ghost" id="btnPinCancel" style="margin-top:8px">Cancel</button>
-    <p class="helper-text" style="margin-top:14px">Forgot your PIN? There's no recovery — you'll need to clear this app's storage from your browser/PWA settings, which resets the connection fields here (your Google Sheet data itself is untouched).</p>
-  </div>
-</div>
-
-<script src="app.js?v=20260801-5"></script>
+<script src="app.js"></script>
 </body>
 </html>

@@ -184,7 +184,6 @@ function generateMonthlyBreakdown(t) {
     const monthIdx = curr.getMonth();
     const monthLabel = curr.toLocaleString("en-IN", { month: "short", year: "numeric" });
 
-    // Find rent applicable for this specific month
     let rentForMonth = Number(t.MonthlyRent || 0);
     if (t.RevisedRent && t.RevisedFrom) {
       const revDate = new Date(t.RevisedFrom);
@@ -193,7 +192,6 @@ function generateMonthlyBreakdown(t) {
       }
     }
 
-    // Filter payments received in this month
     const monthPays = DATA.payments.filter((p) => {
       if (p.TenantID !== t.ID) return false;
       const pd = new Date(p.Date);
@@ -211,7 +209,6 @@ function generateMonthlyBreakdown(t) {
       notes: notes || "—"
     });
 
-    // Advance to next month
     curr.setMonth(curr.getMonth() + 1);
   }
 
@@ -405,6 +402,39 @@ function openTenantProfile(id) {
   $("#tpBalance").className = "amt mono " + (b.balance > 0 ? "due" : "clear");
   $("#tpBalanceLbl").textContent = b.balance > 0 ? "pending balance" : "fully settled";
 
+  // Action Buttons Row (Includes Record Payment, Share Balance, and Month Wise)
+  const btnRow = $("#tpProfileBtnRow") || document.createElement("div");
+  btnRow.id = "tpProfileBtnRow";
+  btnRow.className = "btn-row";
+  btnRow.style.flexWrap = "wrap";
+  btnRow.style.gap = "8px";
+  btnRow.innerHTML = `
+    <button class="btn btn-primary" id="tpBtnRecordPayment" style="flex: 1 1 100%;">Record payment</button>
+    <button class="btn btn-secondary" id="tpBtnStatement" style="flex: 1;">Share balance sheet</button>
+    <button class="btn btn-secondary" id="tpBtnMonthwise" style="flex: 1;">Month wise</button>
+  `;
+
+  // Position button row right after balance box
+  const balanceBox = $("#sheetTenant .balance-box");
+  if (balanceBox && balanceBox.nextElementSibling !== btnRow) {
+    balanceBox.parentNode.insertBefore(btnRow, balanceBox.nextSibling);
+  }
+
+  // Bind Button Handlers
+  $("#tpBtnRecordPayment").onclick = () => {
+    closeSheet("sheetTenant");
+    switchView("add");
+    $("#payTenant").value = activeTenantId;
+    updatePayBalanceBox();
+  };
+  $("#tpBtnStatement").onclick = () => {
+    generateReceipt({ mode: "statement", tenant: t });
+  };
+  $("#tpBtnMonthwise").onclick = () => {
+    openMonthwiseModal(t);
+  };
+
+  // Render Tenant Details
   const details = $("#tpDetails");
   const detailRows = [];
   if (t.Address) detailRows.push(["Address", t.Address]);
@@ -425,41 +455,6 @@ function openTenantProfile(id) {
     details.appendChild(row);
   });
 
-  // Render Month-wise Breakdown Table
-  let monthSection = $("#tpMonthBreakdownSection");
-  if (!monthSection) {
-    monthSection = document.createElement("div");
-    monthSection.id = "tpMonthBreakdownSection";
-    // Insert right before history section
-    const histLabel = $("#tpHistory").previousElementSibling;
-    if (histLabel) histLabel.parentNode.insertBefore(monthSection, histLabel);
-  }
-
-  const monthlyData = generateMonthlyBreakdown(t);
-  let monthHtml = `<div class="group-label" style="margin-top:16px;">Month-wise Breakdown</div><div class="pay-history">`;
-  
-  if (monthlyData.length) {
-    monthlyData.forEach((m) => {
-      const isPaid = m.totalPaidInMonth >= m.rentForMonth;
-      const amtColor = isPaid ? "color:var(--green);" : (m.totalPaidInMonth > 0 ? "color:var(--amber);" : "color:var(--rust);");
-      monthHtml += `
-        <div class="pay-row" style="flex-direction:column; gap:4px; padding:10px 0;">
-          <div style="display:flex; justify-content:space-between; width:100%; font-weight:600;">
-            <div>${m.monthLabel}</div>
-            <div style="${amtColor}">${fmt(m.totalPaidInMonth)} / ${fmt(m.rentForMonth)}</div>
-          </div>
-          <div style="display:flex; justify-content:space-between; width:100%; font-size:12px; color:var(--ink-soft);">
-            <div>Notes: ${m.notes}</div>
-            <div>${isPaid ? "Cleared" : "Pending"}</div>
-          </div>
-        </div>`;
-    });
-  } else {
-    monthHtml += `<div class="helper-text">No monthly breakdown available.</div>`;
-  }
-  monthHtml += `</div>`;
-  monthSection.innerHTML = monthHtml;
-
   // Render Payment History
   const hist = $("#tpHistory");
   const pays = tenantPayments(id);
@@ -473,16 +468,38 @@ function openTenantProfile(id) {
   openSheet("sheetTenant");
 }
 
-$("#tpBtnRecordPayment").onclick = () => {
-  closeSheet("sheetTenant");
-  switchView("add");
-  $("#payTenant").value = activeTenantId;
-  updatePayBalanceBox();
-};
-$("#tpBtnStatement").onclick = () => {
-  const t = DATA.tenants.find((x) => x.ID === activeTenantId);
-  generateReceipt({ mode: "statement", tenant: t });
-};
+function openMonthwiseModal(t) {
+  const container = $("#mwContent");
+  if (!container) return;
+  
+  const monthlyData = generateMonthlyBreakdown(t);
+  let html = `<div class="pay-history">`;
+  
+  if (monthlyData.length) {
+    monthlyData.forEach((m) => {
+      const isPaid = m.totalPaidInMonth >= m.rentForMonth;
+      const amtColor = isPaid ? "color:var(--green);" : (m.totalPaidInMonth > 0 ? "color:var(--amber);" : "color:var(--rust);");
+      html += `
+        <div class="pay-row" style="flex-direction:column; gap:4px; padding:12px 0; border-bottom: 1px solid var(--line);">
+          <div style="display:flex; justify-content:space-between; width:100%; font-weight:600; font-size:15px;">
+            <div>${m.monthLabel}</div>
+            <div style="${amtColor}">${fmt(m.totalPaidInMonth)} / ${fmt(m.rentForMonth)}</div>
+          </div>
+          <div style="display:flex; justify-content:space-between; width:100%; font-size:13px; color:var(--ink-soft);">
+            <div>Notes: ${m.notes}</div>
+            <div style="font-weight:600;">${isPaid ? "Cleared" : "Pending"}</div>
+          </div>
+        </div>`;
+    });
+  } else {
+    html += `<div class="helper-text">No monthly breakdown available.</div>`;
+  }
+  html += `</div>`;
+  container.innerHTML = html;
+  $("#mwTitle").textContent = `${t.Name} — Month-wise`;
+  openSheet("sheetMonthwise");
+}
+
 $("#tpBtnEdit").onclick = () => {
   const t = DATA.tenants.find((x) => x.ID === activeTenantId);
   closeSheet("sheetTenant");
