@@ -173,10 +173,10 @@
       <div class="amt mono" id="tpBalance">₹0</div>
       <div class="lbl" id="tpBalanceLbl">balance</div>
     </div>
-    <div class="btn-row">
-      <button class="btn btn-primary" id="tpBtnRecordPayment">Record payment</button>
-      <button class="btn btn-secondary" id="tpBtnStatement">Share balance sheet</button>
-    </div>
+
+    <!-- Dynamic button row will be rendered here by app.js -->
+    <div id="tpProfileBtnRow" class="btn-row" style="flex-wrap: wrap; gap: 8px; margin-top: 16px;"></div>
+
     <div class="group-label">Details</div>
     <div class="pay-history" id="tpDetails"></div>
     <div class="group-label">Payment history</div>
@@ -185,7 +185,8 @@
     <button class="btn btn-ghost" id="tpBtnEdit">Edit tenant details</button>
   </div>
 </div>
-<!-- Place this right after <div class="sheet-overlay" id="sheetTenant">...</div> -->
+
+<!-- ===================== MONTH-WISE POPUP SHEET ===================== -->
 <div class="sheet-overlay" id="sheetMonthwise">
   <div class="sheet">
     <div class="sheet-handle"></div>

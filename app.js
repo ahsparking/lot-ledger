@@ -16,12 +16,11 @@ const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const fmt = (n) => "₹" + Math.round(Math.abs(n)).toLocaleString("en-IN");
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
-// Helper to determine rent billing period (e.g., July 2026 for August 1st payment under arrears)
+// Helper to determine rent billing period
 function getRentPeriodStr(dateStr) {
   const d = dateStr ? new Date(dateStr) : new Date();
   if (isNaN(d.getTime())) return "—";
   
-  // If payment is made in current month, it covers previous month's period under arrears
   const targetDate = new Date(d.getFullYear(), d.getMonth() - 1, 1);
   return targetDate.toLocaleString("en-IN", { month: "long", year: "numeric" });
 }
@@ -99,10 +98,6 @@ function setConnStatus(ok, msg) {
 // Balance computation (Monthly Due Cycle)
 // ---------------------------------------------------------
 
-/**
- * Calculates matured billing months based on calendar months.
- * On August 1st, July rent matures and becomes due.
- */
 function maturedMonthsBetween(startStr, endStr) {
   const s = new Date(startStr);
   const e = new Date(endStr);
@@ -178,7 +173,6 @@ function generateMonthlyBreakdown(t) {
   const monthsList = [];
   let curr = new Date(start.getFullYear(), start.getMonth(), 1);
 
-  // Generate all months from tenant start date up to current month
   while (curr <= today) {
     const year = curr.getFullYear();
     const monthIdx = curr.getMonth();
@@ -402,39 +396,30 @@ function openTenantProfile(id) {
   $("#tpBalance").className = "amt mono " + (b.balance > 0 ? "due" : "clear");
   $("#tpBalanceLbl").textContent = b.balance > 0 ? "pending balance" : "fully settled";
 
-  // Action Buttons Row (Includes Record Payment, Share Balance, and Month Wise)
-  const btnRow = $("#tpProfileBtnRow") || document.createElement("div");
-  btnRow.id = "tpProfileBtnRow";
-  btnRow.className = "btn-row";
-  btnRow.style.flexWrap = "wrap";
-  btnRow.style.gap = "8px";
-  btnRow.innerHTML = `
-    <button class="btn btn-primary" id="tpBtnRecordPayment" style="flex: 1 1 100%;">Record payment</button>
-    <button class="btn btn-secondary" id="tpBtnStatement" style="flex: 1;">Share balance sheet</button>
-    <button class="btn btn-secondary" id="tpBtnMonthwise" style="flex: 1;">Month wise</button>
-  `;
+  // Build clean, single dynamic action button row
+  const btnRow = $("#tpProfileBtnRow");
+  if (btnRow) {
+    btnRow.innerHTML = `
+      <button class="btn btn-primary" id="tpBtnRecordPayment" style="flex: 1 1 100%;">Record payment</button>
+      <button class="btn btn-secondary" id="tpBtnStatement" style="flex: 1;">Share balance sheet</button>
+      <button class="btn btn-secondary" id="tpBtnMonthwise" style="flex: 1;">Month wise</button>
+    `;
 
-  // Position button row right after balance box
-  const balanceBox = $("#sheetTenant .balance-box");
-  if (balanceBox && balanceBox.nextElementSibling !== btnRow) {
-    balanceBox.parentNode.insertBefore(btnRow, balanceBox.nextSibling);
+    $("#tpBtnRecordPayment").onclick = () => {
+      closeSheet("sheetTenant");
+      switchView("add");
+      $("#payTenant").value = activeTenantId;
+      updatePayBalanceBox();
+    };
+    $("#tpBtnStatement").onclick = () => {
+      generateReceipt({ mode: "statement", tenant: t });
+    };
+    $("#tpBtnMonthwise").onclick = () => {
+      openMonthwiseModal(t);
+    };
   }
 
-  // Bind Button Handlers
-  $("#tpBtnRecordPayment").onclick = () => {
-    closeSheet("sheetTenant");
-    switchView("add");
-    $("#payTenant").value = activeTenantId;
-    updatePayBalanceBox();
-  };
-  $("#tpBtnStatement").onclick = () => {
-    generateReceipt({ mode: "statement", tenant: t });
-  };
-  $("#tpBtnMonthwise").onclick = () => {
-    openMonthwiseModal(t);
-  };
-
-  // Render Tenant Details
+  // Render Details
   const details = $("#tpDetails");
   const detailRows = [];
   if (t.Address) detailRows.push(["Address", t.Address]);
@@ -687,7 +672,7 @@ async function generateReceipt({ mode, tenant, amount, date, payMode, note }) {
   ctx.beginPath(); ctx.moveTo(40, y); ctx.lineTo(W - 40, y); ctx.stroke();
   y += 38;
 
-  // Detail Rows with "Rent period" included
+  // Detail Rows
   const rows = [];
   rows.push(["Tenant", tenant.Name]);
   rows.push(["Lot / spot", `${propertyName(tenant.PropertyID)} · ${tenant.SpotLabel || "—"}`]);
