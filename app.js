@@ -89,16 +89,21 @@ function setConnStatus(ok, msg) {
 // Balance computation (Monthly Due Cycle)
 // ---------------------------------------------------------
 
+// ---------------------------------------------------------
+// Balance computation (Monthly Due Cycle)
+// ---------------------------------------------------------
+
 /**
- * Calculates matured billing months based on calendar months.
- * On August 1st, July rent matures and becomes due.
+ * Calculates matured billing months based on the 1st of every month.
+ * If start date is July 15 and today is Aug 5:
+ * July matured on Aug 1 -> 1 month due.
  */
 function maturedMonthsBetween(startStr, endStr) {
   const s = new Date(startStr);
   const e = new Date(endStr);
   if (isNaN(s.getTime()) || isNaN(e.getTime()) || e < s) return 0;
 
-  // Month difference based purely on calendar months reached
+  // Month difference based purely on Calendar Months matured
   let months = (e.getFullYear() - s.getFullYear()) * 12 + (e.getMonth() - s.getMonth());
   
   return Math.max(months, 0);
@@ -115,7 +120,6 @@ function tenantPayments(tenantId) {
     .sort((a, b) => new Date(b.Date) - new Date(a.Date));
 }
 
-// Rent currently in effect (revised rent if it has kicked in, else fixed rent)
 function currentRent(t) {
   if (t.RevisedRent && t.RevisedFrom && new Date(t.RevisedFrom) <= new Date()) {
     return Number(t.RevisedRent);
@@ -154,11 +158,6 @@ function tenantBalance(t) {
   const paid = pays.reduce((s, p) => s + Number(p.Amount || 0), 0);
 
   return { charged, paid, balance: charged - paid };
-}
-
-function propertyName(id) {
-  const p = DATA.properties.find((p) => p.ID === id);
-  return p ? p.Name : "—";
 }
 
 // ---------------------------------------------------------
