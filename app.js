@@ -16,6 +16,16 @@ const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const fmt = (n) => "₹" + Math.round(Math.abs(n)).toLocaleString("en-IN");
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
+// Helper to determine rent billing period (e.g., July 2026 for August 1st payment under arrears)
+function getRentPeriodStr(dateStr) {
+  const d = dateStr ? new Date(dateStr) : new Date();
+  if (isNaN(d.getTime())) return "—";
+  
+  // If payment is made in current month, it covers previous month's period under arrears
+  const targetDate = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+  return targetDate.toLocaleString("en-IN", { month: "long", year: "numeric" });
+}
+
 // ---------------------------------------------------------
 // Toast
 // ---------------------------------------------------------
@@ -89,23 +99,16 @@ function setConnStatus(ok, msg) {
 // Balance computation (Monthly Due Cycle)
 // ---------------------------------------------------------
 
-// ---------------------------------------------------------
-// Balance computation (Monthly Due Cycle)
-// ---------------------------------------------------------
-
 /**
- * Calculates matured billing months based on the 1st of every month.
- * If start date is July 15 and today is Aug 5:
- * July matured on Aug 1 -> 1 month due.
+ * Calculates matured billing months based on calendar months.
+ * On August 1st, July rent matures and becomes due.
  */
 function maturedMonthsBetween(startStr, endStr) {
   const s = new Date(startStr);
   const e = new Date(endStr);
   if (isNaN(s.getTime()) || isNaN(e.getTime()) || e < s) return 0;
 
-  // Month difference based purely on Calendar Months matured
   let months = (e.getFullYear() - s.getFullYear()) * 12 + (e.getMonth() - s.getMonth());
-  
   return Math.max(months, 0);
 }
 
@@ -152,12 +155,16 @@ function tenantBalance(t) {
     charged += maturedMonthsBetween(baselineStart, endCap) * Number(t.MonthlyRent || 0);
   }
 
-  // Subtract all payments
   let pays = tenantPayments(t.ID);
   if (hasOpening) pays = pays.filter((p) => p.Date >= t.OpeningBalanceDate);
   const paid = pays.reduce((s, p) => s + Number(p.Amount || 0), 0);
 
   return { charged, paid, balance: charged - paid };
+}
+
+function propertyName(id) {
+  const p = DATA.properties.find((p) => p.ID === id);
+  return p ? p.Name : "—";
 }
 
 // ---------------------------------------------------------
@@ -191,7 +198,6 @@ function renderDashboard() {
   $("#statCollectedMonth").textContent = fmt(collected30);
   $("#statProperties").textContent = DATA.properties.length;
 
-  // property scroll
   const wrap = $("#propertyScroll");
   wrap.innerHTML = "";
   DATA.properties.forEach((p) => {
@@ -210,7 +216,6 @@ function renderDashboard() {
     wrap.innerHTML = `<div class="empty-state" style="width:100%"><p>No lots yet.</p><button class="btn btn-primary" onclick="openSheet('sheetAddProperty')">+ Add your first lot</button></div>`;
   }
 
-  // due list (top 5)
   const dueListEl = $("#dueList");
   const sorted = activeTenants
     .map((t) => ({ t, b: tenantBalance(t) }))
@@ -512,65 +517,68 @@ async function generateReceipt({ mode, tenant, amount, date, payMode, note }) {
   ctx.fillStyle = teal;
   ctx.beginPath();
   ctx.moveTo(26, 0); ctx.lineTo(W - 26, 0);
-  ctx.arcTo(W, 0, W, 26, 26); ctx.lineTo(W, 210);
-  ctx.lineTo(0, 210); ctx.lineTo(0, 26); ctx.arcTo(0, 0, 26, 0, 26);
+  ctx.arcTo(W, 0, W, 26, 26); ctx.lineTo(W, 215);
+  ctx.lineTo(0, 215); ctx.lineTo(0, 26); ctx.arcTo(0, 0, 26, 0, 26);
   ctx.closePath(); ctx.fill();
 
-  ctx.fillStyle = "rgba(255,255,255,.75)";
-  ctx.font = "600 20px Inter";
-  ctx.fillText((CONFIG.bizName || "Lot Ledger"), 40, 60);
-  ctx.font = "500 15px Inter";
-  if (CONFIG.bizPhone) ctx.fillText(CONFIG.bizPhone, 40, 84);
-
-  ctx.fillStyle = "#fff";
-  ctx.font = "600 24px 'Space Grotesk'";
-  ctx.fillText(isPaid ? "PAYMENT RECEIPT" : "BALANCE STATEMENT", 40, 130);
-
+  // Business Name & Phone (Increased font sizes)
   ctx.fillStyle = "rgba(255,255,255,.85)";
-  ctx.font = "500 14px 'IBM Plex Mono'";
-  ctx.fillText((isPaid ? "Received on " : "As of ") + (date || todayStr()), 40, 160);
+  ctx.font = "600 24px Inter";
+  ctx.fillText((CONFIG.bizName || "Lot Ledger"), 40, 58);
+  ctx.font = "500 17px Inter";
+  if (CONFIG.bizPhone) ctx.fillText(CONFIG.bizPhone, 40, 86);
 
-  // status stamp circle
-  ctx.save();
-  ctx.translate(W - 100, 105);
-  ctx.rotate(-0.18);
-  ctx.strokeStyle = "rgba(255,255,255,.55)";
-  ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.arc(0, 0, 46, 0, Math.PI * 2); ctx.stroke();
+  // Title & Date Subtitle
+  ctx.fillStyle = "#fff";
+  ctx.font = "700 28px 'Space Grotesk'";
+  ctx.fillText(isPaid ? "PAYMENT RECEIPT" : "BALANCE STATEMENT", 40, 136);
+
   ctx.fillStyle = "rgba(255,255,255,.9)";
-  ctx.font = "700 15px Inter";
+  ctx.font = "500 16px 'IBM Plex Mono'";
+  ctx.fillText((isPaid ? "Received on " : "As of ") + (date || todayStr()), 40, 168);
+
+  // Status Stamp Circle
+  ctx.save();
+  ctx.translate(W - 95, 105);
+  ctx.rotate(-0.18);
+  ctx.strokeStyle = "rgba(255,255,255,.65)";
+  ctx.lineWidth = 3.5;
+  ctx.beginPath(); ctx.arc(0, 0, 46, 0, Math.PI * 2); ctx.stroke();
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "700 17px Inter";
   ctx.textAlign = "center";
   const stampText = isPaid ? (b.balance > 0 ? "PARTIAL" : "PAID") : (b.balance > 0 ? "DUE" : "CLEAR");
   ctx.fillText(stampText, 0, 6);
   ctx.textAlign = "left";
   ctx.restore();
 
-  // perforation dots between header and body
+  // Perforation dots
   ctx.fillStyle = cream;
   for (let x = 30; x < W - 20; x += 22) {
-    ctx.beginPath(); ctx.arc(x, 210, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x, 215, 7, 0, Math.PI * 2); ctx.fill();
   }
 
-  let y = 250;
-  // Big amount
-  ctx.fillStyle = ink;
-  ctx.font = "500 15px Inter";
+  let y = 260;
+  // Big Amount Section (Increased size)
+  ctx.fillStyle = inkSoft;
+  ctx.font = "600 17px Inter";
   ctx.fillText(isPaid ? "Amount received" : "Total amount due", 40, y);
-  y += 44;
-  ctx.font = "700 52px 'IBM Plex Mono'";
+  y += 46;
+  ctx.font = "700 58px 'IBM Plex Mono'";
   ctx.fillStyle = isPaid ? green : (b.balance > 0 ? rust : green);
   ctx.fillText(fmt(isPaid ? amount : Math.max(b.balance, 0)), 40, y);
-  y += 40;
+  y += 38;
 
-  // divider
+  // Divider
   ctx.strokeStyle = line; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(40, y); ctx.lineTo(W - 40, y); ctx.stroke();
-  y += 36;
+  y += 38;
 
-  // detail rows
+  // Detail Rows with "Rent period" included
   const rows = [];
   rows.push(["Tenant", tenant.Name]);
   rows.push(["Lot / spot", `${propertyName(tenant.PropertyID)} · ${tenant.SpotLabel || "—"}`]);
+  rows.push(["Rent period", getRentPeriodStr(date)]);
   rows.push(["Monthly rent", fmt(currentRent(tenant))]);
   if (isPaid) {
     rows.push(["Mode", payMode || "—"]);
@@ -578,16 +586,17 @@ async function generateReceipt({ mode, tenant, amount, date, payMode, note }) {
   }
   rows.push([isPaid ? "Balance after payment" : "Balance", b.balance > 0 ? fmt(b.balance) + " due" : "Settled"]);
 
-  ctx.font = "500 16px Inter";
+  // Render Table Rows (Increased Font Sizes)
   rows.forEach(([k, v]) => {
+    ctx.font = "500 18px Inter";
     ctx.fillStyle = inkSoft;
     ctx.fillText(k, 40, y);
+    
     ctx.fillStyle = ink;
-    ctx.font = "600 16px Inter";
+    ctx.font = "600 18px Inter";
     const vw = ctx.measureText(v).width;
     ctx.fillText(v, W - 40 - vw, y);
-    ctx.font = "500 16px Inter";
-    y += 38;
+    y += 42;
   });
 
   y += 10;
@@ -595,11 +604,12 @@ async function generateReceipt({ mode, tenant, amount, date, payMode, note }) {
   ctx.setLineDash([6, 6]);
   ctx.beginPath(); ctx.moveTo(40, y); ctx.lineTo(W - 40, y); ctx.stroke();
   ctx.setLineDash([]);
-  y += 34;
+  y += 36;
 
+  // Footer (Increased Font Size)
   ctx.fillStyle = inkSoft;
-  ctx.font = "500 13px 'IBM Plex Mono'";
-  ctx.fillText("Generated by Lot Ledger · " + new Date().toLocaleString("en-IN"), 40, H - 30);
+  ctx.font = "500 15px 'IBM Plex Mono'";
+  ctx.fillText("Generated by Lot Ledger · " + new Date().toLocaleString("en-IN"), 40, H - 32);
 
   $("#receiptTitle").textContent = isPaid ? "Payment receipt" : "Balance statement";
   openSheet("sheetReceipt");
