@@ -168,6 +168,57 @@ function propertyName(id) {
 }
 
 // ---------------------------------------------------------
+// Month-wise Breakdown Generator
+// ---------------------------------------------------------
+function generateMonthlyBreakdown(t) {
+  const today = new Date();
+  const start = new Date(t.StartDate);
+  if (isNaN(start.getTime())) return [];
+
+  const monthsList = [];
+  let curr = new Date(start.getFullYear(), start.getMonth(), 1);
+
+  // Generate all months from tenant start date up to current month
+  while (curr <= today) {
+    const year = curr.getFullYear();
+    const monthIdx = curr.getMonth();
+    const monthLabel = curr.toLocaleString("en-IN", { month: "short", year: "numeric" });
+
+    // Find rent applicable for this specific month
+    let rentForMonth = Number(t.MonthlyRent || 0);
+    if (t.RevisedRent && t.RevisedFrom) {
+      const revDate = new Date(t.RevisedFrom);
+      if (curr >= new Date(revDate.getFullYear(), revDate.getMonth(), 1)) {
+        rentForMonth = Number(t.RevisedRent);
+      }
+    }
+
+    // Filter payments received in this month
+    const monthPays = DATA.payments.filter((p) => {
+      if (p.TenantID !== t.ID) return false;
+      const pd = new Date(p.Date);
+      return pd.getFullYear() === year && pd.getMonth() === monthIdx;
+    });
+
+    const totalPaidInMonth = monthPays.reduce((sum, p) => sum + Number(p.Amount || 0), 0);
+    const notes = monthPays.map(p => p.Note).filter(Boolean).join(", ");
+
+    monthsList.unshift({
+      monthLabel,
+      dueDate: `${year}-${String(monthIdx + 1).padStart(2, '0')}-01`,
+      rentForMonth,
+      totalPaidInMonth,
+      notes: notes || "—"
+    });
+
+    // Advance to next month
+    curr.setMonth(curr.getMonth() + 1);
+  }
+
+  return monthsList;
+}
+
+// ---------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------
 function renderAll() {
@@ -210,7 +261,6 @@ function renderDashboard() {
       <div class="pc-name">${p.Name}</div>
       <div class="pc-amt ${due > 0 ? "" : "clear"} mono">${due > 0 ? fmt(due) + " due" : "All clear"}</div>`;
     
-    // FIXED: Correctly switch view and trigger list rendering
     chip.onclick = () => {
       switchView("tenants");
       renderTenantList("all");
@@ -375,6 +425,42 @@ function openTenantProfile(id) {
     details.appendChild(row);
   });
 
+  // Render Month-wise Breakdown Table
+  let monthSection = $("#tpMonthBreakdownSection");
+  if (!monthSection) {
+    monthSection = document.createElement("div");
+    monthSection.id = "tpMonthBreakdownSection";
+    // Insert right before history section
+    const histLabel = $("#tpHistory").previousElementSibling;
+    if (histLabel) histLabel.parentNode.insertBefore(monthSection, histLabel);
+  }
+
+  const monthlyData = generateMonthlyBreakdown(t);
+  let monthHtml = `<div class="group-label" style="margin-top:16px;">Month-wise Breakdown</div><div class="pay-history">`;
+  
+  if (monthlyData.length) {
+    monthlyData.forEach((m) => {
+      const isPaid = m.totalPaidInMonth >= m.rentForMonth;
+      const amtColor = isPaid ? "color:var(--green);" : (m.totalPaidInMonth > 0 ? "color:var(--amber);" : "color:var(--rust);");
+      monthHtml += `
+        <div class="pay-row" style="flex-direction:column; gap:4px; padding:10px 0;">
+          <div style="display:flex; justify-content:space-between; width:100%; font-weight:600;">
+            <div>${m.monthLabel}</div>
+            <div style="${amtColor}">${fmt(m.totalPaidInMonth)} / ${fmt(m.rentForMonth)}</div>
+          </div>
+          <div style="display:flex; justify-content:space-between; width:100%; font-size:12px; color:var(--ink-soft);">
+            <div>Notes: ${m.notes}</div>
+            <div>${isPaid ? "Cleared" : "Pending"}</div>
+          </div>
+        </div>`;
+    });
+  } else {
+    monthHtml += `<div class="helper-text">No monthly breakdown available.</div>`;
+  }
+  monthHtml += `</div>`;
+  monthSection.innerHTML = monthHtml;
+
+  // Render Payment History
   const hist = $("#tpHistory");
   const pays = tenantPayments(id);
   hist.innerHTML = pays.length ? "" : '<div class="helper-text">No payments recorded yet.</div>';
