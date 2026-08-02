@@ -86,26 +86,21 @@ function setConnStatus(ok, msg) {
 }
 
 // ---------------------------------------------------------
-// Balance computation (Strict Arrears Billing)
+// Balance computation (Monthly Due Cycle)
 // ---------------------------------------------------------
 
 /**
- * Counts full completed billing cycles between two dates.
- * Under Arrears Billing:
- * Rent for July (July 1–31) is billed on August 1st.
- * Therefore, during August, only 1 billing cycle (July) has matured.
+ * Calculates matured billing months based on calendar months.
+ * On August 1st, July rent matures and becomes due.
  */
-function completedMonthsBetween(startStr, endStr) {
+function maturedMonthsBetween(startStr, endStr) {
   const s = new Date(startStr);
   const e = new Date(endStr);
   if (isNaN(s.getTime()) || isNaN(e.getTime()) || e < s) return 0;
 
+  // Month difference based purely on calendar months reached
   let months = (e.getFullYear() - s.getFullYear()) * 12 + (e.getMonth() - s.getMonth());
   
-  if (e.getDate() < s.getDate()) {
-    months--;
-  }
-
   return Math.max(months, 0);
 }
 
@@ -146,13 +141,14 @@ function tenantBalance(t) {
   let charged = openingAmt;
 
   if (t.RevisedRent && t.RevisedFrom) {
-    const oldMonths = completedMonthsBetween(baselineStart, dayBefore(t.RevisedFrom));
-    const newMonths = completedMonthsBetween(t.RevisedFrom, endCap);
+    const oldMonths = maturedMonthsBetween(baselineStart, dayBefore(t.RevisedFrom));
+    const newMonths = maturedMonthsBetween(t.RevisedFrom, endCap);
     charged += oldMonths * Number(t.MonthlyRent || 0) + newMonths * Number(t.RevisedRent || 0);
   } else {
-    charged += completedMonthsBetween(baselineStart, endCap) * Number(t.MonthlyRent || 0);
+    charged += maturedMonthsBetween(baselineStart, endCap) * Number(t.MonthlyRent || 0);
   }
 
+  // Subtract all payments
   let pays = tenantPayments(t.ID);
   if (hasOpening) pays = pays.filter((p) => p.Date >= t.OpeningBalanceDate);
   const paid = pays.reduce((s, p) => s + Number(p.Amount || 0), 0);
