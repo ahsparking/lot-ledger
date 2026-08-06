@@ -784,7 +784,7 @@ async function generateReceipt({ mode, tenant, amount, date, payMode, note }) {
   ctx.fillStyle = inkSoft;
   ctx.font = "600 17px Inter";
   ctx.fillText(isPaid ? "Amount received" : "Total amount due", 40, y);
-  y += 46;
+  y += 64;
   ctx.font = "700 58px 'IBM Plex Mono'";
   ctx.fillStyle = isPaid ? green : (b.balance > 0 ? rust : green);
   ctx.fillText(fmt(isPaid ? amount : Math.max(b.balance, 0)), 40, y);
