@@ -453,11 +453,14 @@ function openTenantProfile(id) {
   openSheet("sheetTenant");
 }
 
+let activeMonthwise = null; // { tenant, data } for whichever tenant's sheet is currently open
+
 function openMonthwiseModal(t) {
   const container = $("#mwContent");
   if (!container) return;
   
   const monthlyData = generateMonthlyBreakdown(t);
+  activeMonthwise = { tenant: t, data: monthlyData };
   let html = `<div class="pay-history">`;
   
   if (monthlyData.length) {
@@ -484,6 +487,126 @@ function openMonthwiseModal(t) {
   $("#mwTitle").textContent = `${t.Name} — Month-wise`;
   openSheet("sheetMonthwise");
 }
+
+// ---------------------------------------------------------
+// Month-wise PDF export (for sharing outstanding statement with tenant)
+// ---------------------------------------------------------
+function exportMonthwisePDF(t, monthlyData) {
+  if (!window.jspdf) { toast("PDF library didn't load — check your connection"); return; }
+  if (!monthlyData || !monthlyData.length) { toast("Nothing to export yet"); return; }
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: "pt", format: "a4" });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const marginX = 40;
+  const bottomLimit = pageH - 60;
+  let y = 50;
+
+  const col = { month: marginX, rent: marginX + 160, paid: marginX + 280, status: marginX + 400 };
+
+  function drawTableHeader() {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(90, 90, 90);
+    doc.text("Month", col.month, y);
+    doc.text("Rent", col.rent, y);
+    doc.text("Paid", col.paid, y);
+    doc.text("Status", col.status, y);
+    y += 6;
+    doc.setDrawColor(210);
+    doc.line(marginX, y, pageW - marginX, y);
+    y += 18;
+    doc.setTextColor(20, 20, 20);
+  }
+
+  // Header block
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(16);
+  doc.text(CONFIG.bizName || "Parking Rent Statement", marginX, y);
+  y += 20;
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.setTextColor(100, 100, 100);
+  if (CONFIG.bizPhone) { doc.text("Contact: " + CONFIG.bizPhone, marginX, y); y += 14; }
+  doc.text("Statement generated on " + new Date().toLocaleDateString("en-IN"), marginX, y);
+  y += 26;
+
+  doc.setTextColor(20, 20, 20);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(13);
+  doc.text(`${t.Name} — Month-wise Statement`, marginX, y);
+  if (t.SpotLabel) {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(100, 100, 100);
+    doc.text("Spot: " + t.SpotLabel, pageW - marginX, y, { align: "right" });
+    doc.setTextColor(20, 20, 20);
+  }
+  y += 14;
+  doc.setDrawColor(160);
+  doc.line(marginX, y, pageW - marginX, y);
+  y += 24;
+
+  drawTableHeader();
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  let totalRent = 0, totalPaid = 0;
+
+  monthlyData.forEach((m) => {
+    if (y > bottomLimit) {
+      doc.addPage();
+      y = 50;
+      drawTableHeader();
+    }
+    const isPaid = m.totalPaidInMonth >= m.rentForMonth;
+    totalRent += m.rentForMonth;
+    totalPaid += m.totalPaidInMonth;
+
+    doc.setTextColor(20, 20, 20);
+    doc.text(m.monthLabel, col.month, y);
+    doc.text(fmt(m.rentForMonth), col.rent, y);
+    doc.text(fmt(m.totalPaidInMonth), col.paid, y);
+
+    if (isPaid) doc.setTextColor(30, 140, 60);
+    else if (m.totalPaidInMonth > 0) doc.setTextColor(190, 130, 20);
+    else doc.setTextColor(190, 60, 60);
+    doc.text(isPaid ? "Cleared" : "Pending", col.status, y);
+
+    y += 18;
+  });
+
+  y += 8;
+  doc.setDrawColor(160);
+  doc.line(marginX, y, pageW - marginX, y);
+  y += 22;
+
+  const outstanding = totalRent - totalPaid;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.setTextColor(20, 20, 20);
+  doc.text("Total outstanding: " + fmt(outstanding), marginX, y);
+
+  const fileName = `${t.Name.replace(/\s+/g, "_")}_statement.pdf`;
+
+  // Prefer native share sheet (so it can go straight to WhatsApp etc.), fall back to download
+  const blob = doc.output("blob");
+  if (navigator.canShare && navigator.share) {
+    const file = new File([blob], fileName, { type: "application/pdf" });
+    if (navigator.canShare({ files: [file] })) {
+      navigator.share({ files: [file], title: fileName }).catch(() => doc.save(fileName));
+      return;
+    }
+  }
+  doc.save(fileName);
+}
+
+$("#btnExportMonthwisePDF").onclick = () => {
+  if (!activeMonthwise) return toast("Open a tenant's month-wise view first");
+  exportMonthwisePDF(activeMonthwise.tenant, activeMonthwise.data);
+};
 
 $("#tpBtnEdit").onclick = () => {
   const t = DATA.tenants.find((x) => x.ID === activeTenantId);
