@@ -37,6 +37,24 @@ function toast(msg) {
   toastTimer = setTimeout(() => t.classList.remove("show"), 2600);
 }
 
+// Wraps a button's onclick handler so it disables itself, shows "Saving…",
+// and guards against double-taps while a save is already in flight —
+// re-enabling automatically whether the save succeeds or fails.
+function withSavingState(btn, label, handler) {
+  const originalText = btn.textContent;
+  btn.onclick = async () => {
+    if (btn.disabled) return; // already saving — ignore extra taps
+    btn.disabled = true;
+    btn.textContent = label || "Saving…";
+    try {
+      await handler();
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  };
+}
+
 // ---------------------------------------------------------
 // API
 // ---------------------------------------------------------
@@ -649,7 +667,7 @@ $("#btnAddTenantTop").onclick = () => {
   openSheet("sheetAddTenant");
 };
 
-$("#btnSaveProperty").onclick = async () => {
+withSavingState($("#btnSaveProperty"), "Saving…", async () => {
   const name = $("#apName").value.trim();
   if (!name) return toast("Enter a lot name");
   try {
@@ -659,9 +677,9 @@ $("#btnSaveProperty").onclick = async () => {
     closeSheet("sheetAddProperty");
     await loadData();
   } catch (e) { toast(e.message); }
-};
+});
 
-$("#btnSaveTenant").onclick = async () => {
+withSavingState($("#btnSaveTenant"), "Saving…", async () => {
   const name = $("#atName").value.trim();
   const propertyId = $("#atProperty").value;
   const rent = $("#atRent").value;
@@ -695,11 +713,11 @@ $("#btnSaveTenant").onclick = async () => {
     closeSheet("sheetAddTenant");
     await loadData();
   } catch (e) { toast(e.message); }
-};
+});
 
 $("#payTenant").addEventListener("change", updatePayBalanceBox);
 
-$("#btnSavePayment").onclick = async () => {
+withSavingState($("#btnSavePayment"), "Saving…", async () => {
   const tenantId = $("#payTenant").value;
   const amount = Number($("#payAmount").value);
   const date = $("#payDate").value || todayStr();
@@ -714,7 +732,7 @@ $("#btnSavePayment").onclick = async () => {
     $("#payAmount").value = ""; $("#payNote").value = "";
     switchView("dashboard");
   } catch (e) { toast(e.message); }
-};
+});
 
 // ---------------------------------------------------------
 // Receipt / statement image generation (canvas)
