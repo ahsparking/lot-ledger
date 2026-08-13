@@ -1,4 +1,4 @@
-const CACHE = "lot-ledger-v11";
+const CACHE = "lot-ledger-v12";
 const ASSETS = [
   "./",
   "./index.html",
@@ -34,7 +34,7 @@ self.addEventListener("fetch", (e) => {
   // whenever you're online. Falls back to the cached copy only if offline.
   if (e.request.method === "GET" && url.origin === self.location.origin) {
     e.respondWith(
-      fetch(e.request)
+      fetch(e.request, { cache: "no-store" })   // bypass HTTP cache too, not just the SW cache
         .then((res) => {
           if (res && res.ok) {
             const clone = res.clone();
