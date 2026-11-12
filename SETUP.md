@@ -75,3 +75,25 @@ The app is a set of static files (`index.html`, `style.css`, `app.js`, etc.) —
 - **"Couldn't reach the sheet"** — double check the Web app URL and API key in Settings match exactly what's in `Code.gs`, and that the deployment's access is set to "Anyone."
 - **Changes in the sheet aren't showing** — tap Settings → **Refresh from Google Sheet**.
 - **Icon/install option missing** — the site must be opened over `https://` (both GitHub Pages and Netlify give you this automatically).
+
+---
+
+## Updating to this version (vacated tenants + balance fixes)
+
+1. **Backend:** open your Google Sheet → Extensions → Apps Script → replace the code with the new `Code.gs`
+   (keep your own `API_KEY` line!) → Deploy → Manage deployments → ✏️ Edit → Version: **New version** → Deploy.
+   The new columns (`VacatedDate`, `VacateNote`, `Period`) are added to your sheet automatically the first time they are needed.
+2. **App:** upload all files (including the new `core.js`) to GitHub Pages / Netlify, then reopen the app once
+   (close and reopen it so the new version loads).
+
+### Vacated tenants
+- Open a tenant → **Mark as vacated** → pick the date. Rent is charged through the vacate month, then stops.
+- They disappear from Home, the tenant list, and the payment dropdown (unless they still owe money).
+- To look at them later: **Tenants → Vacated**. From there you can see full history or **Reactivate**.
+- If a vacated tenant still owes money, Home shows a small reminder line so it is never forgotten.
+
+### How balances are calculated (same everywhere now)
+- Rent is due in arrears: August's rent falls due on 1 September.
+- Payments are applied to the oldest dues first (opening balance, then oldest month).
+- Revised rent applies from the month that contains the "effective from" date.
+- Agreement end / vacate date: that month is charged in full.

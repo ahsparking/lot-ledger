@@ -14,16 +14,11 @@ let lastReceiptCanvasBlobUrl = null;
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 const fmt = (n) => "₹" + Math.round(Math.abs(n)).toLocaleString("en-IN");
-const todayStr = () => new Date().toISOString().slice(0, 10);
+const { todayStr, parseYMD, isActive, computeLedger, periodLabel, prevMonthValue } = window.LedgerCore;
 
-// Helper to determine rent billing period
-function getRentPeriodStr(dateStr) {
-  const d = dateStr ? new Date(dateStr) : new Date();
-  if (isNaN(d.getTime())) return "—";
-  
-  const targetDate = new Date(d.getFullYear(), d.getMonth() - 1, 1);
-  return targetDate.toLocaleString("en-IN", { month: "long", year: "numeric" });
-}
+// Escape text before putting it into innerHTML (names/notes come from the sheet)
+const esc = (v) => String(v == null ? "" : v).replace(/[&<>"']/g,
+  (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 // ---------------------------------------------------------
 // Toast
@@ -116,63 +111,22 @@ function setConnStatus(ok, msg) {
 // Balance computation (Monthly Due Cycle)
 // ---------------------------------------------------------
 
-function maturedMonthsBetween(startStr, endStr) {
-  const s = new Date(startStr);
-  const e = new Date(endStr);
-  if (isNaN(s.getTime()) || isNaN(e.getTime()) || e < s) return 0;
-
-  let months = (e.getFullYear() - s.getFullYear()) * 12 + (e.getMonth() - s.getMonth());
-  return Math.max(months, 0);
-}
-
-function dayBefore(dateStr) {
-  const d = new Date(dateStr);
-  d.setDate(d.getDate() - 1);
-  return d.toISOString().slice(0, 10);
-}
-
 function tenantPayments(tenantId) {
   return DATA.payments.filter((p) => p.TenantID === tenantId)
-    .sort((a, b) => new Date(b.Date) - new Date(a.Date));
+    .sort((a, b) => String(b.Date).localeCompare(String(a.Date)));
 }
 
 function currentRent(t) {
-  if (t.RevisedRent && t.RevisedFrom && new Date(t.RevisedFrom) <= new Date()) {
-    return Number(t.RevisedRent);
-  }
+  const rf = parseYMD(t.RevisedFrom);
+  if (t.RevisedRent && rf && rf <= parseYMD(todayStr())) return Number(t.RevisedRent);
   return Number(t.MonthlyRent || 0);
 }
 
-function firstOfNextMonth(dateStr) {
-  const d = new Date(dateStr);
-  const n = new Date(d.getFullYear(), d.getMonth() + 1, 1);
-  return n.toISOString().slice(0, 10);
-}
-
+// Single source of truth — see core.js for the rules.
+function tenantLedger(t) { return computeLedger(t, DATA.payments, todayStr()); }
 function tenantBalance(t) {
-  const today = todayStr();
-  const endCap = (t.AgreementEnd && t.AgreementEnd < today) ? t.AgreementEnd : today;
-
-  const hasOpening = t.OpeningBalance !== undefined && t.OpeningBalance !== "" && t.OpeningBalanceDate;
-  const openingAmt = hasOpening ? Number(t.OpeningBalance) || 0 : 0;
-  
-  const baselineStart = hasOpening ? firstOfNextMonth(t.OpeningBalanceDate) : t.StartDate;
-
-  let charged = openingAmt;
-
-  if (t.RevisedRent && t.RevisedFrom) {
-    const oldMonths = maturedMonthsBetween(baselineStart, dayBefore(t.RevisedFrom));
-    const newMonths = maturedMonthsBetween(t.RevisedFrom, endCap);
-    charged += oldMonths * Number(t.MonthlyRent || 0) + newMonths * Number(t.RevisedRent || 0);
-  } else {
-    charged += maturedMonthsBetween(baselineStart, endCap) * Number(t.MonthlyRent || 0);
-  }
-
-  let pays = tenantPayments(t.ID);
-  if (hasOpening) pays = pays.filter((p) => p.Date >= t.OpeningBalanceDate);
-  const paid = pays.reduce((s, p) => s + Number(p.Amount || 0), 0);
-
-  return { charged, paid, balance: charged - paid };
+  const L = tenantLedger(t);
+  return { charged: L.charged, paid: L.paid, balance: L.balance };
 }
 
 function propertyName(id) {
@@ -181,64 +135,18 @@ function propertyName(id) {
 }
 
 // ---------------------------------------------------------
-// Month-wise Breakdown Generator
-// ---------------------------------------------------------
-function generateMonthlyBreakdown(t) {
-  const today = new Date();
-  const start = new Date(t.StartDate);
-  if (isNaN(start.getTime())) return [];
-
-  const monthsList = [];
-  let curr = new Date(start.getFullYear(), start.getMonth(), 1);
-
-  while (curr <= today) {
-    const year = curr.getFullYear();
-    const monthIdx = curr.getMonth();
-    const monthLabel = curr.toLocaleString("en-IN", { month: "short", year: "numeric" });
-
-    let rentForMonth = Number(t.MonthlyRent || 0);
-    if (t.RevisedRent && t.RevisedFrom) {
-      const revDate = new Date(t.RevisedFrom);
-      if (curr >= new Date(revDate.getFullYear(), revDate.getMonth(), 1)) {
-        rentForMonth = Number(t.RevisedRent);
-      }
-    }
-
-    const monthPays = DATA.payments.filter((p) => {
-      if (p.TenantID !== t.ID) return false;
-      const pd = new Date(p.Date);
-      return pd.getFullYear() === year && pd.getMonth() === monthIdx;
-    });
-
-    const totalPaidInMonth = monthPays.reduce((sum, p) => sum + Number(p.Amount || 0), 0);
-    const notes = monthPays.map(p => p.Note).filter(Boolean).join(", ");
-
-    monthsList.unshift({
-      monthLabel,
-      dueDate: `${year}-${String(monthIdx + 1).padStart(2, '0')}-01`,
-      rentForMonth,
-      totalPaidInMonth,
-      notes: notes || "—"
-    });
-
-    curr.setMonth(curr.getMonth() + 1);
-  }
-
-  return monthsList;
-}
-
-// ---------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------
 function renderAll() {
   renderDashboard();
   renderPropertyOptions();
-  renderTenantList($("#tenantFilter .active")?.dataset.filter || "all");
+  renderTenantList(currentTenantFilter());
   renderPayTenantOptions();
 }
 
 function renderDashboard() {
-  const activeTenants = DATA.tenants.filter((t) => t.Active !== false && t.Active !== "FALSE");
+  const activeTenants = DATA.tenants.filter(isActive);
+  const vacatedTenants = DATA.tenants.filter((t) => !isActive(t));
   let totalDue = 0, dueCount = 0;
   activeTenants.forEach((t) => {
     const { balance } = tenantBalance(t);
@@ -252,7 +160,7 @@ function renderDashboard() {
 
   $("#heroTotal").textContent = fmt(totalDue);
   $("#heroSub").textContent = dueCount === 0
-    ? (DATA.tenants.length ? "All tenants are settled 🎉" : "Add a tenant to get started")
+    ? (activeTenants.length ? "All tenants are settled 🎉" : (DATA.tenants.length ? "No active tenants" : "Add a tenant to get started"))
     : dueCount + " tenant" + (dueCount > 1 ? "s" : "") + " owe rent right now";
   $("#statTenantsDue").textContent = dueCount;
   $("#statCollectedMonth").textContent = fmt(collected30);
@@ -261,19 +169,15 @@ function renderDashboard() {
   const wrap = $("#propertyScroll");
   wrap.innerHTML = "";
   DATA.properties.forEach((p) => {
-    const tenants = DATA.tenants.filter((t) => t.PropertyID === p.ID);
+    const tenants = activeTenants.filter((t) => t.PropertyID === p.ID);
     let due = 0;
     tenants.forEach((t) => { const b = tenantBalance(t).balance; if (b > 0) due += b; });
     const chip = document.createElement("div");
     chip.className = "property-chip";
-    chip.innerHTML = `<div class="pc-type">${p.Type || "Lot"}</div>
-      <div class="pc-name">${p.Name}</div>
+    chip.innerHTML = `<div class="pc-type">${esc(p.Type || "Lot")}</div>
+      <div class="pc-name">${esc(p.Name)}</div>
       <div class="pc-amt ${due > 0 ? "" : "clear"} mono">${due > 0 ? fmt(due) + " due" : "All clear"}</div>`;
-    
-    chip.onclick = () => {
-      switchView("tenants");
-      renderTenantList("all");
-    };
+    chip.onclick = () => { showTenantFilter("all"); switchView("tenants"); };
     wrap.appendChild(chip);
   });
   if (!DATA.properties.length) {
@@ -287,54 +191,92 @@ function renderDashboard() {
     .sort((a, b) => b.b.balance - a.b.balance)
     .slice(0, 5);
   dueListEl.innerHTML = "";
-  if (!sorted.length && DATA.tenants.length) {
+  if (!sorted.length && activeTenants.length) {
     dueListEl.innerHTML = `<div class="empty-state"><p>Nobody's pending. Nice work.</p></div>`;
   }
   sorted.forEach(({ t, b }) => dueListEl.appendChild(ticketCard(t, b)));
+
+  // Money still owed by tenants who have already left — hidden from the lists above,
+  // but never silently forgotten.
+  let vacDue = 0, vacCount = 0;
+  vacatedTenants.forEach((t) => { const b = tenantBalance(t).balance; if (b > 0) { vacDue += b; vacCount++; } });
+  const vn = $("#vacatedNote");
+  if (vacCount) {
+    vn.style.display = "block";
+    vn.innerHTML = `<b class="mono">${fmt(vacDue)}</b> still pending from ${vacCount} vacated tenant${vacCount > 1 ? "s" : ""} · <u>view</u>`;
+    vn.onclick = () => { showTenantFilter("vacated"); switchView("tenants"); };
+  } else {
+    vn.style.display = "none";
+  }
 }
 
 function renderPropertyOptions() {
   const sel = $("#atProperty");
-  sel.innerHTML = DATA.properties.map((p) => `<option value="${p.ID}">${p.Name}</option>`).join("") ||
+  sel.innerHTML = DATA.properties.map((p) => `<option value="${esc(p.ID)}">${esc(p.Name)}</option>`).join("") ||
     `<option value="">Add a lot first</option>`;
 }
 
 function ticketCard(t, b) {
-  const status = b.balance > 0 ? "due" : (b.paid > 0 && b.balance < 0 ? "clear" : "clear");
+  const active = isActive(t);
   const el = document.createElement("div");
-  el.className = "ticket";
+  el.className = "ticket" + (active ? "" : " vacated");
+  const pill = !active ? "vacated" : (b.balance > 0 ? "due" : "clear");
+  const pillText = !active ? "Vacated" + (t.VacatedDate ? " · " + esc(String(t.VacatedDate).slice(0, 10)) : "")
+    : (b.balance > 0 ? "Due" : "Cleared");
   el.innerHTML = `
-    <div class="ticket-stub"><span class="spot-label">${(t.SpotLabel || "—")}</span></div>
+    <div class="ticket-stub"><span class="spot-label">${esc(t.SpotLabel || "—")}</span></div>
     <div class="ticket-divider"></div>
     <div class="ticket-body">
       <div class="ticket-top">
         <div>
-          <div class="ticket-name">${t.Name}</div>
-          <div class="ticket-meta">${propertyName(t.PropertyID)}</div>
+          <div class="ticket-name">${esc(t.Name)}</div>
+          <div class="ticket-meta">${esc(propertyName(t.PropertyID))}</div>
         </div>
         <div class="ticket-amt ${b.balance > 0 ? "due" : "paid"} mono">${b.balance > 0 ? fmt(b.balance) : (b.balance < 0 ? fmt(b.balance) + " adv" : "₹0")}</div>
       </div>
-      <span class="status-pill ${status}">${b.balance > 0 ? "Due" : "Cleared"}</span>
+      <span class="status-pill ${pill}">${pillText}</span>
     </div>`;
   el.onclick = () => openTenantProfile(t.ID);
   return el;
+}
+
+function currentTenantFilter() {
+  return $("#tenantFilter .active")?.dataset.filter || "all";
+}
+function showTenantFilter(f) {
+  $$("#tenantFilter button").forEach((b) => b.classList.toggle("active", b.dataset.filter === f));
+  renderTenantList(f);
 }
 
 function renderTenantList(filter) {
   const list = $("#tenantList");
   if (!list) return;
   list.innerHTML = "";
-  const byProp = {};
-  DATA.tenants.forEach((t) => {
-    (byProp[t.PropertyID] = byProp[t.PropertyID] || []).push(t);
-  });
+
+  // Vacated tab shows its count so you know whether there is anything inside
+  const vacBtn = $('#tenantFilter [data-filter="vacated"]');
+  const vacCount = DATA.tenants.filter((t) => !isActive(t)).length;
+  if (vacBtn) vacBtn.textContent = "Vacated" + (vacCount ? " (" + vacCount + ")" : "");
+
   if (!DATA.tenants.length) {
     list.innerHTML = `<div class="empty-state"><p>No tenants added yet.</p><button class="btn btn-primary" onclick="openSheet('sheetAddTenant')">+ Add tenant</button></div>`;
     return;
   }
+  const showVacated = filter === "vacated";
+  const pool = DATA.tenants.filter((t) => isActive(t) !== showVacated);
+  if (showVacated) {
+    const h = document.createElement("p");
+    h.className = "helper-text";
+    h.style.margin = "0 0 4px";
+    h.textContent = vacCount
+      ? "Tenants who have left. Open one to see their full history, or reactivate them."
+      : "No vacated tenants. When a tenant leaves, open their profile and tap “Mark as vacated”.";
+    list.appendChild(h);
+  }
+  const byProp = {};
+  pool.forEach((t) => { (byProp[t.PropertyID] = byProp[t.PropertyID] || []).push(t); });
   Object.keys(byProp).forEach((propId) => {
-    let tenants = byProp[propId];
-    const filtered = tenants.filter((t) => {
+    const filtered = byProp[propId].filter((t) => {
       const b = tenantBalance(t).balance;
       if (filter === "due") return b > 0;
       if (filter === "clear") return b <= 0;
@@ -346,16 +288,22 @@ function renderTenantList(filter) {
     label.textContent = propertyName(propId);
     list.appendChild(label);
     filtered
-      .sort((a, b) => tenantBalance(b).balance - tenantBalance(a).balance)
-      .forEach((t) => list.appendChild(ticketCard(t, tenantBalance(t))));
+      .map((t) => ({ t, b: tenantBalance(t) }))
+      .sort((x, y) => y.b.balance - x.b.balance)
+      .forEach(({ t, b }) => list.appendChild(ticketCard(t, b)));
   });
+}
+
+// Active tenants, plus vacated tenants who still owe money (so final dues can be recorded)
+function payableTenants() {
+  return DATA.tenants.filter((t) => isActive(t) || tenantBalance(t).balance > 0);
 }
 
 function renderPayTenantOptions() {
   const sel = $("#payTenant");
   const prev = sel.value;
-  sel.innerHTML = DATA.tenants.map((t) =>
-    `<option value="${t.ID}">${t.Name} — ${propertyName(t.PropertyID)} (${t.SpotLabel || "—"})</option>`
+  sel.innerHTML = payableTenants().map((t) =>
+    `<option value="${esc(t.ID)}">${esc(t.Name)} — ${esc(propertyName(t.PropertyID))} (${esc(t.SpotLabel || "—")})${isActive(t) ? "" : " · vacated"}</option>`
   ).join("") || `<option value="">Add a tenant first</option>`;
   if (prev) sel.value = prev;
   updatePayBalanceBox();
@@ -376,6 +324,11 @@ function updatePayBalanceBox() {
 // ---------------------------------------------------------
 // Navigation
 // ---------------------------------------------------------
+let payPeriodTouched = false;
+function syncPayPeriod() {
+  if (!payPeriodTouched) $("#payPeriod").value = prevMonthValue($("#payDate").value || todayStr());
+}
+
 function switchView(name) {
   currentView = name;
   $$(".view").forEach((v) => v.classList.remove("active"));
@@ -384,10 +337,11 @@ function switchView(name) {
   
   if (name === "add") {
     $("#payDate").value = todayStr();
+    payPeriodTouched = false;
+    syncPayPeriod();
     renderPayTenantOptions();
   } else if (name === "tenants") {
-    const activeFilter = $("#tenantFilter .active")?.dataset.filter || "all";
-    renderTenantList(activeFilter);
+    renderTenantList(currentTenantFilter());
   }
   window.scrollTo(0, 0);
 }
@@ -406,101 +360,183 @@ function openTenantProfile(id) {
   activeTenantId = id;
   const t = DATA.tenants.find((x) => x.ID === id);
   if (!t) return;
+  const active = isActive(t);
   const b = tenantBalance(t);
   $("#tpAvatar").textContent = (t.Name || "?").charAt(0).toUpperCase();
   $("#tpName").textContent = t.Name;
-  $("#tpSub").textContent = `${propertyName(t.PropertyID)} · Spot ${t.SpotLabel || "—"} · ${fmt(currentRent(t))}/mo`;
+  $("#tpSub").textContent = `${propertyName(t.PropertyID)} · Spot ${t.SpotLabel || "—"} · ${fmt(currentRent(t))}/mo` +
+    (active ? "" : " · Vacated" + (t.VacatedDate ? " " + String(t.VacatedDate).slice(0, 10) : ""));
   $("#tpBalance").textContent = b.balance > 0 ? fmt(b.balance) : (b.balance < 0 ? fmt(b.balance) + " advance" : "₹0");
   $("#tpBalance").className = "amt mono " + (b.balance > 0 ? "due" : "clear");
   $("#tpBalanceLbl").textContent = b.balance > 0 ? "pending balance" : "fully settled";
 
-  // Action Buttons Row
+  // Action buttons
   const btnRow = $("#tpProfileBtnRow");
-  if (btnRow) {
-    btnRow.innerHTML = `
-      <button class="btn btn-primary" id="tpBtnRecordPayment" style="flex: 1 1 100%;">Record payment</button>
-      <button class="btn btn-secondary" id="tpBtnStatement" style="flex: 1;">Share balance sheet</button>
-      <button class="btn btn-secondary" id="tpBtnMonthwise" style="flex: 1;">Month wise</button>
-    `;
+  btnRow.innerHTML = `
+    ${(active || b.balance > 0) ? `<button class="btn btn-primary" id="tpBtnRecordPayment" style="flex: 1 1 100%;">Record payment</button>` : ""}
+    <button class="btn btn-secondary" id="tpBtnStatement" style="flex: 1;">Share balance sheet</button>
+    <button class="btn btn-secondary" id="tpBtnMonthwise" style="flex: 1;">Month wise</button>
+  `;
+  const rp = $("#tpBtnRecordPayment");
+  if (rp) rp.onclick = () => {
+    closeSheet("sheetTenant");
+    switchView("add");
+    $("#payTenant").value = activeTenantId;
+    updatePayBalanceBox();
+  };
+  $("#tpBtnStatement").onclick = () => generateReceipt({ mode: "statement", tenant: t });
+  $("#tpBtnMonthwise").onclick = () => openMonthwiseModal(t);
 
-    $("#tpBtnRecordPayment").onclick = () => {
-      closeSheet("sheetTenant");
-      switchView("add");
-      $("#payTenant").value = activeTenantId;
-      updatePayBalanceBox();
-    };
-    $("#tpBtnStatement").onclick = () => {
-      generateReceipt({ mode: "statement", tenant: t });
-    };
-    $("#tpBtnMonthwise").onclick = () => {
-      openMonthwiseModal(t);
-    };
+  // Vacate / reactivate
+  const lc = $("#tpBtnLifecycle");
+  if (active) {
+    lc.textContent = "Mark as vacated";
+    lc.className = "btn btn-danger-ghost";
+    lc.onclick = () => openVacateSheet(t);
+  } else {
+    lc.textContent = "Reactivate tenant";
+    lc.className = "btn btn-ghost";
+    lc.onclick = () => reactivateTenant(t);
   }
 
-  // Render Details
+  // Details
   const details = $("#tpDetails");
   const detailRows = [];
+  if (!active) detailRows.push(["Status", "Vacated" + (t.VacatedDate ? " on " + String(t.VacatedDate).slice(0, 10) : "")]);
+  if (!active && t.VacateNote) detailRows.push(["Vacate note", t.VacateNote]);
+  if (t.Phone) detailRows.push(["Phone", t.Phone]);
   if (t.Address) detailRows.push(["Address", t.Address]);
   const vehBits = [];
   if (Number(t.CarCount)) vehBits.push(t.CarCount + " car" + (t.CarCount > 1 ? "s" : ""));
   if (Number(t.BikeCount)) vehBits.push(t.BikeCount + " bike" + (t.BikeCount > 1 ? "s" : ""));
   detailRows.push(["Vehicle", (t.VehicleType || "—") + (vehBits.length ? " · " + vehBits.join(", ") : "")]);
   detailRows.push(["Fixed rent", fmt(t.MonthlyRent)]);
-  if (t.RevisedRent) detailRows.push(["Revised rent", fmt(t.RevisedRent) + " (from " + t.RevisedFrom + ")"]);
+  if (t.RevisedRent) detailRows.push(["Revised rent", fmt(t.RevisedRent) + " (from " + String(t.RevisedFrom).slice(0, 10) + ")"]);
   if (t.Advance) detailRows.push(["Advance held", fmt(t.Advance)]);
-  if (t.OpeningBalanceDate) detailRows.push(["Opening balance", fmt(t.OpeningBalance || 0) + " as of " + t.OpeningBalanceDate]);
-  detailRows.push(["Agreement", t.StartDate + (t.AgreementEnd ? " → " + t.AgreementEnd : " → ongoing")]);
+  if (t.OpeningBalanceDate) detailRows.push(["Opening balance", fmt(t.OpeningBalance || 0) + " as of " + String(t.OpeningBalanceDate).slice(0, 10)]);
+  detailRows.push(["Agreement", String(t.StartDate).slice(0, 10) + (t.AgreementEnd ? " → " + String(t.AgreementEnd).slice(0, 10) : " → ongoing")]);
   details.innerHTML = "";
   detailRows.forEach(([k, v]) => {
     const row = document.createElement("div");
     row.className = "pay-row";
-    row.innerHTML = `<div>${k}</div><div class="pr-amt" style="font-family:var(--font-body);font-weight:500">${v}</div>`;
+    row.innerHTML = `<div>${esc(k)}</div><div class="pr-amt" style="font-family:var(--font-body);font-weight:500">${esc(v)}</div>`;
     details.appendChild(row);
   });
 
-  // Render Payment History
+  // Payment history
   const hist = $("#tpHistory");
   const pays = tenantPayments(id);
   hist.innerHTML = pays.length ? "" : '<div class="helper-text">No payments recorded yet.</div>';
   pays.forEach((p) => {
+    const per = periodLabel(p.Period);
     const row = document.createElement("div");
     row.className = "pay-row";
-    row.innerHTML = `<div><div>${p.Mode || "Payment"}${p.Note ? " · " + p.Note : ""}</div><div class="pr-date">${p.Date}</div></div><div class="pr-amt">${fmt(p.Amount)}</div>`;
+    row.innerHTML = `<div><div>${esc(p.Mode || "Payment")}${per ? " · for " + esc(per) : ""}${p.Note ? " · " + esc(p.Note) : ""}</div><div class="pr-date">${esc(String(p.Date).slice(0, 10))}</div></div><div class="pr-amt">${fmt(p.Amount)}</div>`;
     hist.appendChild(row);
   });
   openSheet("sheetTenant");
 }
 
-let activeMonthwise = null; // { tenant, data } for whichever tenant's sheet is currently open
+// ---------------------------------------------------------
+// Vacate / reactivate a tenant
+// ---------------------------------------------------------
+let vacateTenant = null;
+
+function updateVacateSummary() {
+  const t = vacateTenant;
+  if (!t) return;
+  const date = $("#vcDate").value || todayStr();
+  // Preview: what the ledger will look like once vacated on this date
+  const L = computeLedger({ ...t, Active: false, VacatedDate: date }, DATA.payments, todayStr());
+  const adv = Number(t.Advance || 0);
+  const net = L.balance - adv;
+  const rows = [
+    ["Rent charged up to", L.lastChargedLabel || "—"],
+    ["Pending rent", L.balance > 0 ? fmt(L.balance) : (L.balance < 0 ? fmt(L.balance) + " credit" : "₹0")]
+  ];
+  if (adv) rows.push(["Advance held", fmt(adv)]);
+  if (adv) rows.push([net > 0 ? "Tenant still owes (after advance)" : "To refund tenant (after dues)", fmt(net)]);
+  $("#vcSummary").innerHTML = rows.map(([k, v]) =>
+    `<div class="pay-row"><div>${esc(k)}</div><div class="pr-amt">${esc(v)}</div></div>`).join("");
+  $("#vcWarn").style.display = L.balance > 0 ? "block" : "none";
+}
+
+function openVacateSheet(t) {
+  vacateTenant = t;
+  closeSheet("sheetTenant");
+  $("#vcName").textContent = t.Name;
+  $("#vcDate").value = todayStr();
+  $("#vcNote").value = "";
+  updateVacateSummary();
+  openSheet("sheetVacate");
+}
+$("#vcDate").addEventListener("change", updateVacateSummary);
+
+withSavingState($("#btnConfirmVacate"), "Saving…", async () => {
+  const t = vacateTenant;
+  if (!t) return;
+  const date = $("#vcDate").value || todayStr();
+  try {
+    await api("updateTenant", { id: t.ID, active: false, vacatedDate: date, vacateNote: $("#vcNote").value.trim() });
+    toast(t.Name + " marked as vacated");
+    closeSheet("sheetVacate");
+    await loadData();
+  } catch (e) { toast(e.message); }
+});
+
+async function reactivateTenant(t) {
+  if (!confirm("Reactivate " + t.Name + "? Rent will be charged as normal again, including any months since they left.")) return;
+  try {
+    await api("updateTenant", { id: t.ID, active: true, vacatedDate: "", vacateNote: "" });
+    toast(t.Name + " is active again");
+    closeSheet("sheetTenant");
+    await loadData();
+    showTenantFilter("all");
+  } catch (e) { toast(e.message); }
+}
+
+// ---------------------------------------------------------
+// Month-wise view (newest first) — driven by the same ledger as the balance
+// ---------------------------------------------------------
+let activeMonthwise = null; // { tenant, ledger }
 
 function openMonthwiseModal(t) {
   const container = $("#mwContent");
-  if (!container) return;
-  
-  const monthlyData = generateMonthlyBreakdown(t);
-  activeMonthwise = { tenant: t, data: monthlyData };
+  const L = tenantLedger(t);
+  activeMonthwise = { tenant: t, ledger: L };
+  const col = (st) => st === "paid" ? "color:var(--green);" : (st === "partial" ? "color:var(--amber);" : "color:var(--rust);");
+  const label = (st) => st === "paid" ? "Cleared" : (st === "partial" ? "Part paid" : "Pending");
+  const rowHtml = (left, right, rightStyle, subL, subR) => `
+    <div class="pay-row" style="flex-direction:column; gap:4px; padding:12px 0; border-bottom: 1px solid var(--line);">
+      <div style="display:flex; justify-content:space-between; width:100%; font-weight:600; font-size:15px;">
+        <div>${esc(left)}</div><div style="${rightStyle}">${esc(right)}</div>
+      </div>
+      <div style="display:flex; justify-content:space-between; width:100%; font-size:13px; color:var(--ink-soft);">
+        <div>${esc(subL)}</div><div style="font-weight:600;">${esc(subR)}</div>
+      </div>
+    </div>`;
+
   let html = `<div class="pay-history">`;
-  
-  if (monthlyData.length) {
-    monthlyData.forEach((m) => {
-      const isPaid = m.totalPaidInMonth >= m.rentForMonth;
-      const amtColor = isPaid ? "color:var(--green);" : (m.totalPaidInMonth > 0 ? "color:var(--amber);" : "color:var(--rust);");
-      html += `
-        <div class="pay-row" style="flex-direction:column; gap:4px; padding:12px 0; border-bottom: 1px solid var(--line);">
-          <div style="display:flex; justify-content:space-between; width:100%; font-weight:600; font-size:15px;">
-            <div>${m.monthLabel}</div>
-            <div style="${amtColor}">${fmt(m.totalPaidInMonth)} / ${fmt(m.rentForMonth)}</div>
-          </div>
-          <div style="display:flex; justify-content:space-between; width:100%; font-size:13px; color:var(--ink-soft);">
-            <div>Notes: ${m.notes}</div>
-            <div style="font-weight:600;">${isPaid ? "Cleared" : "Pending"}</div>
-          </div>
-        </div>`;
-    });
-  } else {
-    html += `<div class="helper-text">No monthly breakdown available.</div>`;
+  if (L.upcoming) {
+    html += rowHtml(L.upcoming.label, fmt(L.upcoming.rent), "color:var(--ink-soft);",
+      "Running month — falls due on the 1st of next month", "Upcoming");
   }
-  html += `</div>`;
+  for (let i = L.months.length - 1; i >= 0; i--) {
+    const m = L.months[i];
+    html += rowHtml(m.label, `${fmt(m.allocated)} / ${fmt(m.rent)}`, col(m.status),
+      m.status === "paid" ? "" : `Short by ${fmt(m.rent - m.allocated)}`, label(m.status));
+  }
+  if (L.opening) {
+    const st = L.openingPaid >= L.opening ? "paid" : (L.openingPaid > 0 ? "partial" : "due");
+    html += rowHtml("Opening balance", `${fmt(L.openingPaid)} / ${fmt(L.opening)}`, col(st),
+      "Carried over from before this app", label(st));
+  }
+  if (!L.months.length && !L.opening && !L.upcoming) html += `<div class="helper-text">No monthly breakdown available yet.</div>`;
+  html += `</div>
+    <div class="balance-box" style="margin-top:12px">
+      <div class="amt mono ${L.balance > 0 ? "due" : "clear"}">${L.balance > 0 ? fmt(L.balance) : (L.balance < 0 ? fmt(L.balance) + " credit" : "₹0")}</div>
+      <div class="lbl">${L.balance > 0 ? "total outstanding" : "fully settled"} · payments are applied to the oldest dues first</div>
+    </div>`;
   container.innerHTML = html;
   $("#mwTitle").textContent = `${t.Name} — Month-wise`;
   openSheet("sheetMonthwise");
@@ -509,9 +545,9 @@ function openMonthwiseModal(t) {
 // ---------------------------------------------------------
 // Month-wise PDF export (for sharing outstanding statement with tenant)
 // ---------------------------------------------------------
-function exportMonthwisePDF(t, monthlyData) {
+function exportMonthwisePDF(t, L) {
   if (!window.jspdf) { toast("PDF library didn't load — check your connection"); return; }
-  if (!monthlyData || !monthlyData.length) { toast("Nothing to export yet"); return; }
+  if (!L || (!L.months.length && !L.opening)) { toast("Nothing to export yet"); return; }
 
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: "pt", format: "a4" });
@@ -538,7 +574,6 @@ function exportMonthwisePDF(t, monthlyData) {
     doc.setTextColor(20, 20, 20);
   }
 
-  // Header block
   doc.setFont("helvetica", "bold");
   doc.setFontSize(16);
   doc.text(CONFIG.bizName || "Parking Rent Statement", marginX, y);
@@ -568,31 +603,26 @@ function exportMonthwisePDF(t, monthlyData) {
   y += 24;
 
   drawTableHeader();
-
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
-  let totalRent = 0, totalPaid = 0;
 
-  monthlyData.forEach((m) => {
-    if (y > bottomLimit) {
-      doc.addPage();
-      y = 50;
-      drawTableHeader();
-    }
-    const isPaid = m.totalPaidInMonth >= m.rentForMonth;
-    totalRent += m.rentForMonth;
-    totalPaid += m.totalPaidInMonth;
+  const statusText = { paid: "Cleared", partial: "Part paid", due: "Pending" };
+  const statusRGB = { paid: [30, 140, 60], partial: [190, 130, 20], due: [190, 60, 60] };
+  const rows = [];
+  if (L.opening) {
+    const st = L.openingPaid >= L.opening ? "paid" : (L.openingPaid > 0 ? "partial" : "due");
+    rows.push({ label: "Opening balance", rent: L.opening, paid: L.openingPaid, st });
+  }
+  L.months.forEach((m) => rows.push({ label: m.label, rent: m.rent, paid: m.allocated, st: m.status }));
 
+  rows.forEach((r) => {
+    if (y > bottomLimit) { doc.addPage(); y = 50; drawTableHeader(); }
     doc.setTextColor(20, 20, 20);
-    doc.text(m.monthLabel, col.month, y);
-    doc.text(fmt(m.rentForMonth), col.rent, y);
-    doc.text(fmt(m.totalPaidInMonth), col.paid, y);
-
-    if (isPaid) doc.setTextColor(30, 140, 60);
-    else if (m.totalPaidInMonth > 0) doc.setTextColor(190, 130, 20);
-    else doc.setTextColor(190, 60, 60);
-    doc.text(isPaid ? "Cleared" : "Pending", col.status, y);
-
+    doc.text(r.label, col.month, y);
+    doc.text(fmt(r.rent), col.rent, y);
+    doc.text(fmt(r.paid), col.paid, y);
+    doc.setTextColor(...statusRGB[r.st]);
+    doc.text(statusText[r.st], col.status, y);
     y += 18;
   });
 
@@ -601,15 +631,12 @@ function exportMonthwisePDF(t, monthlyData) {
   doc.line(marginX, y, pageW - marginX, y);
   y += 22;
 
-  const outstanding = totalRent - totalPaid;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
   doc.setTextColor(20, 20, 20);
-  doc.text("Total outstanding: " + fmt(outstanding), marginX, y);
+  doc.text(L.balance < 0 ? "Advance / credit: " + fmt(L.balance) : "Total outstanding: " + fmt(L.balance), marginX, y);
 
   const fileName = `${t.Name.replace(/\s+/g, "_")}_statement.pdf`;
-
-  // Prefer native share sheet (so it can go straight to WhatsApp etc.), fall back to download
   const blob = doc.output("blob");
   if (navigator.canShare && navigator.share) {
     const file = new File([blob], fileName, { type: "application/pdf" });
@@ -623,7 +650,7 @@ function exportMonthwisePDF(t, monthlyData) {
 
 $("#btnExportMonthwisePDF").onclick = () => {
   if (!activeMonthwise) return toast("Open a tenant's month-wise view first");
-  exportMonthwisePDF(activeMonthwise.tenant, activeMonthwise.data);
+  exportMonthwisePDF(activeMonthwise.tenant, activeMonthwise.ledger);
 };
 
 $("#tpBtnEdit").onclick = () => {
@@ -716,6 +743,8 @@ withSavingState($("#btnSaveTenant"), "Saving…", async () => {
 });
 
 $("#payTenant").addEventListener("change", updatePayBalanceBox);
+$("#payDate").addEventListener("change", syncPayPeriod);
+$("#payPeriod").addEventListener("change", () => { payPeriodTouched = true; });
 
 withSavingState($("#btnSavePayment"), "Saving…", async () => {
   const tenantId = $("#payTenant").value;
@@ -724,11 +753,12 @@ withSavingState($("#btnSavePayment"), "Saving…", async () => {
   if (!tenantId) return toast("Add a tenant first");
   if (!amount || amount <= 0) return toast("Enter a valid amount");
   try {
-    await api("addPayment", { tenantId, amount, date, mode: $("#payMode").value, note: $("#payNote").value });
+    const period = $("#payPeriod").value || prevMonthValue(date);
+    await api("addPayment", { tenantId, amount, date, mode: $("#payMode").value, note: $("#payNote").value, period });
     await loadData();
     toast("Payment saved");
     const t = DATA.tenants.find((x) => x.ID === tenantId);
-    generateReceipt({ mode: "payment", tenant: t, amount, date, payMode: $("#payMode").value, note: $("#payNote").value });
+    generateReceipt({ mode: "payment", tenant: t, amount, date, payMode: $("#payMode").value, note: $("#payNote").value, period });
     $("#payAmount").value = ""; $("#payNote").value = "";
     switchView("dashboard");
   } catch (e) { toast(e.message); }
@@ -737,7 +767,7 @@ withSavingState($("#btnSavePayment"), "Saving…", async () => {
 // ---------------------------------------------------------
 // Receipt / statement image generation (canvas)
 // ---------------------------------------------------------
-async function generateReceipt({ mode, tenant, amount, date, payMode, note }) {
+async function generateReceipt({ mode, tenant, amount, date, payMode, note, period }) {
   await document.fonts.ready;
   const canvas = $("#receiptCanvas");
   const ctx = canvas.getContext("2d");
@@ -817,13 +847,14 @@ async function generateReceipt({ mode, tenant, amount, date, payMode, note }) {
   const rows = [];
   rows.push(["Tenant", tenant.Name]);
   rows.push(["Lot / spot", `${propertyName(tenant.PropertyID)} · ${tenant.SpotLabel || "—"}`]);
-  rows.push(["Rent period", getRentPeriodStr(date)]);
+  if (isPaid) rows.push(["Rent period", periodLabel(period) || periodLabel(prevMonthValue(date))]);
+  else if (tenantLedger(tenant).lastChargedLabel) rows.push(["Rent charged up to", tenantLedger(tenant).lastChargedLabel]);
   rows.push(["Monthly rent", fmt(currentRent(tenant))]);
   if (isPaid) {
     rows.push(["Mode", payMode || "—"]);
     if (note) rows.push(["Note", note]);
   }
-  rows.push([isPaid ? "Balance after payment" : "Balance", b.balance > 0 ? fmt(b.balance) + " due" : "Settled"]);
+  rows.push([isPaid ? "Balance after payment" : "Balance", b.balance > 0 ? fmt(b.balance) + " due" : (b.balance < 0 ? fmt(b.balance) + " advance" : "Settled")]);
 
   // Render Table Rows
   rows.forEach(([k, v]) => {

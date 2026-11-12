@@ -28,7 +28,7 @@ function setup() {
     tenants.appendRow(["ID", "PropertyID", "Name", "Phone", "Address", "SpotLabel",
       "VehicleType", "CarCount", "BikeCount", "MonthlyRent", "Advance",
       "RevisedRent", "RevisedFrom", "StartDate", "AgreementEnd",
-      "OpeningBalance", "OpeningBalanceDate", "Active"]);
+      "OpeningBalance", "OpeningBalanceDate", "Active", "VacatedDate", "VacateNote"]);
   }
 
   var payments = ss.getSheetByName(SHEET_PAYMENTS) || ss.insertSheet(SHEET_PAYMENTS);
@@ -50,7 +50,8 @@ function migrateAddTenantColumns() {
   var lastCol = sheet.getLastColumn();
   var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
   var required = ["Address", "VehicleType", "CarCount", "BikeCount", "Advance",
-    "RevisedRent", "RevisedFrom", "AgreementEnd", "OpeningBalance", "OpeningBalanceDate"];
+    "RevisedRent", "RevisedFrom", "AgreementEnd", "OpeningBalance", "OpeningBalanceDate",
+    "VacatedDate", "VacateNote"];
   var added = [];
   required.forEach(function (h) {
     if (headers.indexOf(h) === -1) {
@@ -74,6 +75,21 @@ function migrateAddPaymentColumns() {
   } else {
     Logger.log("Nothing to add — already up to date.");
   }
+}
+
+// Adds any missing header columns and returns the up-to-date header row.
+// Used automatically so you never have to run a migration by hand.
+function ensureColumns(sheet, names) {
+  var lastCol = sheet.getLastColumn();
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  names.forEach(function (h) {
+    if (headers.indexOf(h) === -1) {
+      lastCol++;
+      sheet.getRange(1, lastCol).setValue(h);
+      headers.push(h);
+    }
+  });
+  return headers;
 }
 
 // ---------- Web app entry points ----------
@@ -182,6 +198,8 @@ function addTenant(data) {
 
 function updateTenant(data) {
   var sheet = getSheet(SHEET_TENANTS);
+  // Vacate feature: make sure its columns exist (adds them on first use)
+  ensureColumns(sheet, ["Active", "VacatedDate", "VacateNote"]);
   var values = sheet.getDataRange().getValues();
   var headers = values[0];
   var idCol = headers.indexOf("ID");
@@ -202,6 +220,8 @@ function updateTenant(data) {
     agreementEnd: { col: "AgreementEnd", cast: String },
     openingBalance: { col: "OpeningBalance", cast: Number },
     openingBalanceDate: { col: "OpeningBalanceDate", cast: String },
+    vacatedDate: { col: "VacatedDate", cast: String },
+    vacateNote: { col: "VacateNote", cast: String },
     active: { col: "Active", cast: function (v) { return v; } }
   };
 
@@ -224,7 +244,7 @@ function updateTenant(data) {
 
 function addPayment(data) {
   var sheet = getSheet(SHEET_PAYMENTS);
-  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var headers = ensureColumns(sheet, ["Period"]);
   var id = nextId("PMT", sheet);
   var values = {
     ID: id,

@@ -389,3 +389,13 @@ main { padding: 4px 18px 32px; max-width: 560px; margin: 0 auto; }
 .badge-live { display:inline-flex; align-items:center; gap:5px; font-size: 11px; color: var(--green); font-weight: 600; }
 .badge-live .dot { width:6px; height:6px; border-radius:50%; background: var(--green); }
 .badge-off { color: var(--rust-soft-text, var(--rust)); }
+
+
+/* ---- Vacated tenants ---- */
+.ticket.vacated { opacity: .78; }
+.status-pill.vacated { background: var(--surface-2); color: var(--ink-soft); }
+.vacated-note {
+  margin: 14px 0 4px; padding: 11px 14px; border-radius: var(--radius-s);
+  background: var(--amber-soft); color: var(--amber); font-size: 13px; cursor: pointer;
+}
+.vc-warn { color: var(--rust); margin-top: 8px; }

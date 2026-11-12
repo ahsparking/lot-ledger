@@ -51,6 +51,7 @@
 
     <div class="section-title"><h2>Needs follow-up</h2><button class="link" data-nav="tenants">See all</button></div>
     <div id="dueList"></div>
+    <div id="vacatedNote" class="vacated-note" style="display:none"></div>
   </section>
 
   <!-- ===================== TENANTS ===================== -->
@@ -60,6 +61,7 @@
       <button data-filter="all" class="active">All</button>
       <button data-filter="due">Due</button>
       <button data-filter="clear">Cleared</button>
+      <button data-filter="vacated">Vacated</button>
     </div>
     <div id="tenantList" style="margin-top:14px"></div>
   </section>
@@ -84,6 +86,11 @@
         <label for="payDate">Date</label>
         <input type="date" id="payDate">
       </div>
+    </div>
+    <div class="field">
+      <label for="payPeriod">Rent month this payment is for</label>
+      <input type="month" id="payPeriod">
+      <div class="helper-text">Shown on the receipt. Defaults to last month (rent is due on the 1st of the next month).</div>
     </div>
     <div class="field">
       <label for="payMode">Mode</label>
@@ -184,6 +191,29 @@
     <div class="pay-history" id="tpHistory"></div>
     <div style="height:6px"></div>
     <button class="btn btn-ghost" id="tpBtnEdit">Edit tenant details</button>
+    <button class="btn btn-danger-ghost" id="tpBtnLifecycle">Mark as vacated</button>
+  </div>
+</div>
+
+<!-- ===================== VACATE TENANT SHEET ===================== -->
+<div class="sheet-overlay" id="sheetVacate">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">Mark <span id="vcName">tenant</span> as vacated</div>
+    <p class="helper-text" style="margin:-8px 0 14px">They move out of your daily lists and stop accruing rent after their last month. Nothing is deleted — find them anytime under Tenants → Vacated.</p>
+    <div class="field">
+      <label for="vcDate">Vacated on</label>
+      <input type="date" id="vcDate">
+    </div>
+    <div class="field">
+      <label for="vcNote">Note (optional)</label>
+      <input type="text" id="vcNote" placeholder="e.g. moved to another city, advance refunded">
+    </div>
+    <div class="pay-history" id="vcSummary"></div>
+    <div class="helper-text vc-warn" id="vcWarn" style="display:none">They still owe rent. You can keep recording payments from their profile under Vacated.</div>
+    <p class="helper-text">Rent for the vacate month is charged in full.</p>
+    <button class="btn btn-primary" id="btnConfirmVacate" style="margin-top:12px">Mark as vacated</button>
+    <button class="btn btn-ghost" onclick="closeSheet('sheetVacate')" style="margin-top:8px">Cancel</button>
   </div>
 </div>
 
@@ -330,6 +360,7 @@
 
 <div class="toast" id="toast"></div>
 
+<script src="core.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
